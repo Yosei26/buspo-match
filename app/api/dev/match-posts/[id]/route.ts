@@ -17,8 +17,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   const { id } = await params;
   const body = await request.json();
-  if (!["approved", "rejected"].includes(body.status)) {
-    return NextResponse.json({ error: "指定できるステータスは approved または rejected です。" }, { status: 400 });
+  if (!["approved", "rejected", "reported", "hidden"].includes(body.status)) {
+    return NextResponse.json({ error: "指定できるステータスは approved, rejected, reported, hidden です。" }, { status: 400 });
   }
 
   const { data, error } = await admin

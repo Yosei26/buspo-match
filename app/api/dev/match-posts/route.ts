@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { DEV_AUTH_OWNER_ID, DEV_AUTH_TEAM_ID, isDevAuthBypassEnabled } from "@/lib/dev-auth";
+import { contactInfoError } from "@/lib/safety";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import type { BallType, SchoolLevel } from "@/lib/types";
 
@@ -47,6 +48,18 @@ export async function POST(request: NextRequest) {
   if (!["rubber", "hard"].includes(ballType)) {
     return NextResponse.json({ error: "硬式/軟式が不正です。" }, { status: 400 });
   }
+  const contactError = contactInfoError(
+    [
+      body.team_name,
+      body.region,
+      body.category,
+      body.desired_conditions,
+      body.body
+    ].map((value) => String(value ?? "")).join("\n")
+  );
+  if (contactError) {
+    return NextResponse.json({ error: contactError }, { status: 400 });
+  }
 
   const { error: teamError } = await admin.from("teams").upsert(
     {
@@ -72,7 +85,7 @@ export async function POST(request: NextRequest) {
       category: String(body.category).trim(),
       desired_conditions: String(body.desired_conditions).trim(),
       body: String(body.body).trim(),
-      status: "pending"
+      status: "approved"
     })
     .select(postSelect)
     .single();

@@ -7,6 +7,7 @@ import { hasSupabaseConfig, supabase } from "@/lib/supabase";
 import { DEMO_OWNER_ID, demoPosts, demoTeams, filterApprovedDemoPosts } from "@/lib/demo-data";
 import { DEV_AUTH_OWNER_ID, isDevAuthBypassEnabled } from "@/lib/dev-auth";
 import { friendlyError, validateRequired } from "@/lib/messages";
+import { contactInfoError } from "@/lib/safety";
 import {
   ballTypeLabels,
   MatchPost,
@@ -63,6 +64,7 @@ export default function HomePage() {
   const user = session?.user ?? null;
   const isDemo = !hasSupabaseConfig;
   const isDevAuth = isDevAuthBypassEnabled();
+  const isProductionReadOnly = Boolean(supabase && !isDevAuth && !isDemo);
   const authUserId = user?.id ?? (isDevAuth ? DEV_AUTH_OWNER_ID : isDemo ? DEMO_OWNER_ID : null);
   const userEmail = user?.email ?? (isDevAuth ? "開発確認モードのテスト投稿者" : isDemo ? "demo-coach@example.com" : "");
   const isAdmin = user?.app_metadata?.role === "admin" || isDemo || isDevAuth;
@@ -77,7 +79,7 @@ export default function HomePage() {
       return;
     }
     if (isDevAuth) {
-      setMessage("開発確認モードです。Supabase標準メール送信を使わず、ローカル専用APIで投稿・承認フローを確認します。");
+      setMessage("開発確認モードです。Supabase標準メール送信を使わず、ローカル専用APIで投稿・即時公開フローを確認します。");
       return;
     }
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -105,16 +107,24 @@ export default function HomePage() {
     loadMyData(user.id);
   }, [user?.id]);
 
-  const canPost = useMemo(() => Boolean(authUserId && (primaryTeam || isDevAuth)), [authUserId, primaryTeam, isDevAuth]);
+  const canPost = useMemo(
+    () => Boolean(!isProductionReadOnly && authUserId && (primaryTeam || isDevAuth)),
+    [authUserId, primaryTeam, isDevAuth, isProductionReadOnly]
+  );
 
   async function signIn(event: FormEvent) {
     event.preventDefault();
+    if (isProductionReadOnly) {
+      setPostError("投稿機能は準備中です。Auth方式が確定するまで、本番環境では公開一覧・詳細・検索のみ利用できます。");
+      setPostSummary([]);
+      return;
+    }
     if (!supabase) {
       setMessage("仮データ版ではメール認証は行いません。画面確認用ユーザーとして操作できます。");
       return;
     }
     if (isDevAuth) {
-      setMessage("開発確認モードではメール認証を送信しません。投稿・承認フローの確認を優先します。");
+      setMessage("開発確認モードではメール認証を送信しません。投稿・即時公開フローの確認を優先します。");
       return;
     }
     const validation = validateRequired([["メールアドレス", email]]);
@@ -308,6 +318,23 @@ export default function HomePage() {
       `会場: ${postForm.venue.trim()}`,
       `補足: ${postForm.body.trim()}`
     ].join("\n");
+    const contactError = contactInfoError(
+      [
+        postForm.team_name,
+        postForm.venue,
+        postForm.desired_opponent,
+        postForm.match_format,
+        postForm.desired_conditions,
+        postForm.body,
+        desiredConditions,
+        postBody
+      ].join("\n")
+    );
+    if (contactError) {
+      setPostError(contactError);
+      setPostSummary([]);
+      return;
+    }
     const summary = [
       `チーム名: ${postForm.team_name.trim()}`,
       `地域: ${postForm.region.trim()}`,
@@ -331,7 +358,7 @@ export default function HomePage() {
         category: postForm.category.trim(),
         desired_conditions: desiredConditions,
         body: postBody,
-        status: "pending",
+        status: "approved",
         created_at: now,
         updated_at: now,
         teams: {
@@ -341,9 +368,10 @@ export default function HomePage() {
         }
       };
       setMyPosts((current) => [demoPost, ...current]);
+      setPosts((current) => [demoPost, ...current].sort((a, b) => a.match_date.localeCompare(b.match_date)));
       setPostForm(initialPost);
       setPostSummary(summary);
-      setMessage("投稿は承認待ちになります。仮データ版のため実保存はされません。");
+      setMessage("投稿を公開しました。仮データ版のため実保存はされません。");
       return;
     }
     if (isDevAuth) {
@@ -371,7 +399,7 @@ export default function HomePage() {
       }
       setPostForm(initialPost);
       setPostSummary(summary);
-      setMessage("投稿は承認待ちになります。開発確認モードでSupabaseに pending として保存しました。");
+      setMessage("投稿を公開しました。開発確認モードでSupabaseに approved として保存しました。");
       await Promise.all([loadMyData(DEV_AUTH_OWNER_ID), loadApprovedPosts()]);
       return;
     }
@@ -385,7 +413,7 @@ export default function HomePage() {
       body: postBody,
       team_id: primaryTeam!.id,
       owner_id: authUserId,
-      status: "pending"
+      status: "approved"
     });
     setLoading(false);
     if (error) {
@@ -394,8 +422,109 @@ export default function HomePage() {
     }
     setPostForm(initialPost);
     setPostSummary(summary);
-    setMessage("投稿は承認待ちになります。管理者承認後に公開されます。");
+    setMessage("投稿を公開しました。連絡先は一般公開されません。");
     await Promise.all([loadMyData(authUserId), loadApprovedPosts()]);
+  }
+
+  async function reportPost(postId: string) {
+    if (isProductionReadOnly) {
+      setMessage("通報機能は準備中です。Auth方式と運用方針が確定するまで本番では有効化しません。");
+      return;
+    }
+    if (!authUserId || (supabase && !isDevAuth && !user)) {
+      setMessage("通報するにはログインが必要です。");
+      return;
+    }
+    const confirmed = window.confirm("この募集を通報しますか。通報が一定数を超えると自動で非表示対象になります。");
+    if (!confirmed) return;
+    if (!supabase) {
+      setMessage("仮データ版のため通報は実保存されません。");
+      return;
+    }
+    if (isDevAuth) {
+      const response = await fetch(`/api/dev/match-posts/${postId}/report`, { method: "POST" });
+      const result = await response.json();
+      if (!response.ok) {
+        setMessage(result.error ?? "開発確認モードで通報を保存できませんでした。");
+        return;
+      }
+      setMessage(result.message ?? "開発確認モードで通報を保存しました。");
+      await Promise.all([loadMyData(DEV_AUTH_OWNER_ID), loadApprovedPosts()]);
+      return;
+    }
+    const { error } = await supabase.from("post_reports").insert({
+      post_id: postId,
+      reporter_id: authUserId,
+      reason: "公開画面からの通報"
+    });
+    if (error) {
+      setMessage(friendlyError(error, "通報を送信できませんでした。"));
+      return;
+    }
+    setMessage("通報を受け付けました。一定数を超えた投稿は自動で非表示対象になります。");
+    await loadApprovedPosts();
+  }
+
+  async function hideMyPost(postId: string) {
+    const confirmed = window.confirm("この募集を非公開にしますか。公開一覧から表示されなくなります。");
+    if (!confirmed) return;
+    if (!supabase) {
+      setMyPosts((current) => current.map((post) => (post.id === postId ? { ...post, status: "hidden" } : post)));
+      setPosts((current) => current.filter((post) => post.id !== postId));
+      setMessage("仮データ上で募集を非公開にしました。");
+      return;
+    }
+    if (isDevAuth) {
+      const response = await fetch(`/api/dev/match-posts/${postId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "hidden" })
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setMessage(result.error ?? "開発確認モードで非公開にできませんでした。");
+        return;
+      }
+      setMessage("募集を非公開にしました。");
+      await Promise.all([loadMyData(DEV_AUTH_OWNER_ID), loadApprovedPosts()]);
+      return;
+    }
+    const { error } = await supabase.from("match_posts").update({ status: "hidden" }).eq("id", postId);
+    if (error) {
+      setMessage(friendlyError(error, "募集を非公開にできませんでした。"));
+      return;
+    }
+    setMessage("募集を非公開にしました。");
+    if (authUserId) await Promise.all([loadMyData(authUserId), loadApprovedPosts()]);
+  }
+
+  async function deleteMyPost(postId: string) {
+    const confirmed = window.confirm("この募集を削除しますか。");
+    if (!confirmed) return;
+    if (!supabase) {
+      setMyPosts((current) => current.filter((post) => post.id !== postId));
+      setPosts((current) => current.filter((post) => post.id !== postId));
+      setMessage("仮データ上で募集を削除しました。");
+      return;
+    }
+    if (isDevAuth) {
+      const response = await fetch(`/api/dev/match-posts/${postId}`, { method: "DELETE" });
+      const result = await response.json();
+      if (!response.ok) {
+        setMessage(result.error ?? "開発確認モードで削除できませんでした。");
+        return;
+      }
+      setMessage("募集を削除しました。");
+      await Promise.all([loadMyData(DEV_AUTH_OWNER_ID), loadApprovedPosts()]);
+      return;
+    }
+    const { error } = await supabase.from("match_posts").delete().eq("id", postId);
+    if (error) {
+      setMessage(friendlyError(error, "募集を削除できませんでした。"));
+      return;
+    }
+    setMessage("募集を削除しました。");
+    if (authUserId) await Promise.all([loadMyData(authUserId), loadApprovedPosts()]);
   }
 
   async function search(event: FormEvent) {
@@ -431,15 +560,23 @@ export default function HomePage() {
           <div className="hero-main">
             <h1>野球部の練習試合相手を探す。</h1>
             <p>
-              中学・高校の顧問、保護者、チーム代表者が日程・地域・区分で募集を確認できます。連絡先は公開せず、投稿は管理者承認後に公開します。
+              {isProductionReadOnly
+                ? "中学・高校の顧問、保護者、チーム代表者が日程・地域・区分で公開中の募集を確認できます。投稿機能は準備中です。"
+                : "中学・高校の顧問、保護者、チーム代表者が日程・地域・区分で募集を確認できます。投稿はログイン後に即時公開され、連絡先は一般公開しません。"}
             </p>
             <div className="hero-actions">
               <a className="button" href="#search">
                 募集を探す
               </a>
-              <button className="button secondary" type="button" onClick={() => setShowPostForm(true)}>
-                募集を投稿する
-              </button>
+              {isProductionReadOnly ? (
+                <a className="button secondary" href="#post-status">
+                  投稿機能について
+                </a>
+              ) : (
+                <button className="button secondary" type="button" onClick={() => setShowPostForm(true)}>
+                  募集を投稿する
+                </button>
+              )}
             </div>
           </div>
 
@@ -467,6 +604,12 @@ export default function HomePage() {
                 <Link className="button secondary" href="/admin">
                   管理画面を見る
                 </Link>
+              </div>
+            ) : isProductionReadOnly ? (
+              <div className="grid">
+                <p className="notice warn">
+                  投稿者ログインは準備中です。Auth方式が確定するまで、本番では公開一覧・詳細・検索のみ利用できます。
+                </p>
               </div>
             ) : (
               <form className="grid" onSubmit={signIn}>
@@ -564,33 +707,47 @@ export default function HomePage() {
             emptyMessage={
               hasActiveFilters
                 ? "条件に一致する募集はありません。条件を変えて検索してください。"
-                : "公開中の募集はまだありません。新しい募集が承認されるとここに表示されます。"
+                : "公開中の募集はまだありません。新しい募集が投稿されるとここに表示されます。"
             }
+            onReport={!isProductionReadOnly && authUserId ? reportPost : undefined}
           />
         </section>
 
-        <section className="section cta-band">
+        <section className="section cta-band" id="post-status">
           <div>
             <h2>募集を投稿する</h2>
             <p>
-              投稿内容はすぐには公開されず、管理者確認後に公開されます。
-              {isDevAuth ? "開発確認モードではSupabaseにpendingで保存します。" : isDemo ? "仮データ版では画面上の確認のみです。" : ""}
+              {isProductionReadOnly
+                ? "本番環境の投稿機能は準備中です。Auth方式が確定するまでは、公開一覧・詳細・検索のみ提供します。"
+                : "ログイン済みユーザーの募集は即時公開されます。本文内の連絡先らしき文字列は投稿前にチェックします。"}
+              {isDevAuth ? "開発確認モードではSupabaseにapprovedで保存し、通報制も確認できます。" : isDemo ? "仮データ版では画面上の確認のみです。" : ""}
             </p>
           </div>
-          <button className="button" type="button" onClick={() => setShowPostForm((current) => !current)}>
-            {showPostForm ? "投稿フォームを閉じる" : "募集を投稿する"}
-          </button>
+          {isProductionReadOnly ? (
+            <span className="mode-pill">投稿準備中</span>
+          ) : (
+            <button className="button" type="button" onClick={() => setShowPostForm((current) => !current)}>
+              {showPostForm ? "投稿フォームを閉じる" : "募集を投稿する"}
+            </button>
+          )}
         </section>
 
-        {authUserId && showPostForm ? (
+        {isProductionReadOnly && showPostForm ? (
+          <section className="section panel">
+            <h2>募集投稿</h2>
+            <p className="notice warn">
+              投稿機能は準備中です。Auth方式、通報運用、連絡導線が確定してから本番で有効化します。
+            </p>
+          </section>
+        ) : authUserId && showPostForm ? (
           <section className="section" id="post-form">
             <form className="panel match-form" onSubmit={createPost}>
               <div className="section-head">
                 <div>
                   <h2>練習試合募集を投稿</h2>
                   <p>
-                    必要事項を入力すると、承認待ちの投稿として確認できます。
-                    {isDevAuth ? "開発確認モードではSupabaseにpendingで保存します。" : isDemo ? "仮データ版では実保存されません。" : ""}
+                    必要事項を入力すると、公開中の募集として確認できます。
+                    {isDevAuth ? "開発確認モードではSupabaseにapprovedで保存します。" : isDemo ? "仮データ版では実保存されません。" : ""}
                   </p>
                 </div>
               </div>
@@ -711,14 +868,14 @@ export default function HomePage() {
               </div>
 
               <p className="notice warn">
-                連絡先は一般公開されません。正式な連絡導線は管理者承認後に関係者だけへ開示する想定です。
+                連絡先は一般公開されません。メールアドレス、電話番号、LINE ID、SNS IDらしき文字列を本文に入れると投稿できません。
               </p>
 
               {postError && <p className="notice error">{postError}</p>}
               {postSummary.length > 0 && (
                 <div className="summary-box">
                   <h3>投稿内容の確認要約</h3>
-                  <p>投稿は承認待ちになります。管理者確認後に公開される想定です。</p>
+                  <p>投稿は公開中になります。連絡先は一般公開されません。</p>
                   <dl>
                     {postSummary.map((item) => {
                       const [label, ...valueParts] = item.split(": ");
@@ -735,7 +892,7 @@ export default function HomePage() {
 
               <div className="actions">
                 <button className="button" disabled={!canPost || loading}>
-                  投稿内容を確認して承認待ちにする
+                  投稿内容を確認して公開する
                 </button>
                 <button className="button secondary" type="button" onClick={() => setShowPostForm(false)}>
                   閉じる
@@ -752,10 +909,10 @@ export default function HomePage() {
           </section>
         ) : null}
 
-        {authUserId && (
+        {!isProductionReadOnly && authUserId && (
           <section className="section">
             <h2>自分の募集</h2>
-            <PostList posts={myPosts} showStatus />
+            <PostList posts={myPosts} showStatus onHide={hideMyPost} onDelete={deleteMyPost} />
           </section>
         )}
       </div>
@@ -766,11 +923,17 @@ export default function HomePage() {
 function PostList({
   posts,
   showStatus = false,
-  emptyMessage
+  emptyMessage,
+  onReport,
+  onHide,
+  onDelete
 }: {
   posts: MatchPost[];
   showStatus?: boolean;
   emptyMessage?: string;
+  onReport?: (postId: string) => void;
+  onHide?: (postId: string) => void;
+  onDelete?: (postId: string) => void;
 }) {
   if (!posts.length) {
     return <p className="empty">{emptyMessage ?? (showStatus ? "自分の投稿はまだありません。" : "公開中の募集はまだありません。")}</p>;
@@ -803,6 +966,21 @@ function PostList({
             <Link className="button secondary" href={`/posts/${post.id}`}>
               詳細を見る
             </Link>
+            {!showStatus && onReport && (
+              <button className="button secondary" type="button" onClick={() => onReport(post.id)}>
+                通報する
+              </button>
+            )}
+            {showStatus && post.status === "approved" && onHide && (
+              <button className="button secondary" type="button" onClick={() => onHide(post.id)}>
+                非公開にする
+              </button>
+            )}
+            {showStatus && onDelete && (
+              <button className="button danger" type="button" onClick={() => onDelete(post.id)}>
+                削除
+              </button>
+            )}
           </div>
         </article>
       ))}

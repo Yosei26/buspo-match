@@ -1,6 +1,6 @@
 export type SchoolLevel = "junior_high" | "high_school" | "club_team";
 export type BallType = "rubber" | "hard";
-export type PostStatus = "pending" | "approved" | "rejected";
+export type PostStatus = "pending" | "approved" | "rejected" | "reported" | "hidden";
 
 export type Team = {
   id: string;
@@ -24,6 +24,8 @@ export type MatchPost = {
   desired_conditions: string;
   body: string;
   status: PostStatus;
+  report_count?: number;
+  hidden_reason?: string | null;
   created_at: string;
   updated_at: string;
   teams?: Pick<Team, "name" | "school_level" | "ball_type"> | null;
@@ -43,5 +45,7 @@ export const ballTypeLabels: Record<BallType, string> = {
 export const statusLabels: Record<PostStatus, string> = {
   pending: "承認待ち",
   approved: "公開中",
-  rejected: "却下"
+  rejected: "却下",
+  reported: "通報対応中",
+  hidden: "非公開"
 };

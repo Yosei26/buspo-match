@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
 import { demoPosts } from "@/lib/demo-data";
+import { isDevAuthBypassEnabled } from "@/lib/dev-auth";
 import { friendlyError } from "@/lib/messages";
 import { hasSupabaseConfig, supabase } from "@/lib/supabase";
 import {
@@ -29,8 +31,22 @@ function valueOrUnset(value: string | null | undefined) {
 export default function PostDetailPage() {
   const params = useParams<{ id: string }>();
   const [post, setPost] = useState<MatchPost | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [message, setMessage] = useState("読み込み中です。");
   const isDemo = !hasSupabaseConfig;
+  const isDevAuth = isDevAuthBypassEnabled();
+  const isProductionReadOnly = Boolean(supabase && !isDevAuth && !isDemo);
+  const canReport = isDemo || isDevAuth || (!isProductionReadOnly && Boolean(session?.user));
+
+  useEffect(() => {
+    if (supabase) {
+      supabase.auth.getSession().then(({ data }) => setSession(data.session));
+      const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+        setSession(nextSession);
+      });
+      return () => data.subscription.unsubscribe();
+    }
+  }, []);
 
   useEffect(() => {
     async function loadPost() {
@@ -52,7 +68,7 @@ export default function PostDetailPage() {
         .single();
 
       if (error) {
-        setMessage(friendlyError(error, "投稿が見つからないか、閲覧権限がありません。未承認投稿は投稿者本人または管理者だけが閲覧できます。"));
+        setMessage(friendlyError(error, "投稿が見つからないか、閲覧権限がありません。非公開または通報対応中の投稿は一般公開されません。"));
         return;
       }
       setPost(data as MatchPost);
@@ -60,6 +76,44 @@ export default function PostDetailPage() {
     }
     loadPost();
   }, [params.id]);
+
+  async function reportPost() {
+    if (!post) return;
+    if (isProductionReadOnly) {
+      setMessage("通報機能は準備中です。Auth方式と運用方針が確定するまで本番では有効化しません。");
+      return;
+    }
+    if (!isDemo && !isDevAuth && !session?.user) {
+      setMessage("通報するにはログインが必要です。");
+      return;
+    }
+    const confirmed = window.confirm("この募集を通報しますか。通報が一定数を超えると自動で非表示対象になります。");
+    if (!confirmed) return;
+    if (!supabase) {
+      setMessage("仮データ版のため通報は実保存されません。");
+      return;
+    }
+    if (isDevAuth) {
+      const response = await fetch(`/api/dev/match-posts/${post.id}/report`, { method: "POST" });
+      const result = await response.json();
+      if (!response.ok) {
+        setMessage(result.error ?? "開発確認モードで通報を保存できませんでした。");
+        return;
+      }
+      setMessage(result.message ?? "開発確認モードで通報を保存しました。");
+      return;
+    }
+    const { error } = await supabase.from("post_reports").insert({
+      post_id: post.id,
+      reporter_id: session!.user.id,
+      reason: "詳細画面からの通報"
+    });
+    if (error) {
+      setMessage(friendlyError(error, "通報を送信できませんでした。"));
+      return;
+    }
+    setMessage("通報を受け付けました。一定数を超えた投稿は自動で非表示対象になります。");
+  }
 
   return (
     <main className="shell">
@@ -130,12 +184,19 @@ export default function PostDetailPage() {
             </section>
 
             <p className="notice warn">
-              連絡先は一般公開していません。問い合わせ導線は、管理者承認後に関係者だけへ開示する設計です。
+              {isProductionReadOnly
+                ? "連絡先は一般公開していません。通報機能はAuth方式が確定するまで準備中です。"
+                : "連絡先は一般公開していません。投稿本文に連絡先らしき情報がある場合は通報してください。"}
             </p>
             <div className="actions">
               <Link className="button" href="/">
                 トップページへ戻る
               </Link>
+              {canReport ? (
+                <button className="button secondary" type="button" onClick={reportPost}>
+                  通報する
+                </button>
+              ) : null}
             </div>
           </article>
         )}

@@ -463,6 +463,18 @@ button {
   color: var(--danger);
 }
 
+.badge.reported {
+  background: #fff8e8;
+  border-color: #ecd5a6;
+  color: var(--warn);
+}
+
+.badge.hidden {
+  background: #eef0f2;
+  border-color: #cbd2d8;
+  color: #43505a;
+}
+
 .empty {
   padding: 24px;
   border: 1px dashed var(--line);

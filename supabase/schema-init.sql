@@ -24,13 +24,38 @@ create table if not exists public.match_posts (
   category text not null check (char_length(category) <= 80),
   desired_conditions text not null check (char_length(desired_conditions) <= 500),
   body text not null check (char_length(body) <= 2000),
-  status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  status text not null default 'approved' check (status in ('pending', 'approved', 'rejected', 'reported', 'hidden')),
+  report_count integer not null default 0 check (report_count >= 0),
+  hidden_reason text,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint match_posts_no_public_contact_check check (
+    not (
+      (desired_conditions || E'\n' || body) ~* '[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}'
+      or (desired_conditions || E'\n' || body) ~* '0[0-9]{1,4}[- ]?[0-9]{1,4}[- ]?[0-9]{3,4}'
+      or (desired_conditions || E'\n' || body) ~* 'line[[:space:]]*(id)?[[:space:]]*[:：]?[[:space:]]*[@A-Z0-9._-]{3,}'
+      or (desired_conditions || E'\n' || body) ~* '(@[A-Z0-9_]{3,}|((instagram|twitter|tiktok|facebook|sns)[[:space:]]*(id|アカウント)?|x[[:space:]]*(id|アカウント))[[:space:]]*[:：][[:space:]]*[@A-Z0-9._-]{3,})'
+    )
+  )
+);
+
+create table if not exists public.post_reports (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references public.match_posts(id) on delete cascade,
+  reporter_id uuid references auth.users(id) on delete set null,
+  reason text not null default 'reported from public screen' check (char_length(reason) <= 500),
+  created_at timestamptz not null default now()
 );
 
 create index if not exists match_posts_public_search_idx
   on public.match_posts (status, match_date, region, category);
+
+create index if not exists post_reports_post_id_idx
+  on public.post_reports (post_id);
+
+create unique index if not exists post_reports_unique_reporter_idx
+  on public.post_reports (post_id, reporter_id)
+  where reporter_id is not null;
 
 create function public.set_updated_at()
 returns trigger
@@ -50,8 +75,43 @@ create trigger match_posts_set_updated_at
 before update on public.match_posts
 for each row execute function public.set_updated_at();
 
+create function public.apply_post_report_threshold()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  next_count integer;
+begin
+  select count(*) into next_count
+  from public.post_reports
+  where post_id = new.post_id;
+
+  update public.match_posts
+  set
+    report_count = next_count,
+    status = case
+      when next_count >= 3 and status = 'approved' then 'reported'
+      else status
+    end,
+    hidden_reason = case
+      when next_count >= 3 and status = 'approved' then '通報件数がしきい値を超えました'
+      else hidden_reason
+    end
+  where id = new.post_id;
+
+  return new;
+end;
+$$;
+
+create trigger post_reports_apply_threshold
+after insert on public.post_reports
+for each row execute function public.apply_post_report_threshold();
+
 alter table public.teams enable row level security;
 alter table public.match_posts enable row level security;
+alter table public.post_reports enable row level security;
 
 create function public.is_admin()
 returns boolean
@@ -95,12 +155,12 @@ using (
   or public.is_admin()
 );
 
-create policy "owners can insert pending posts"
+create policy "owners can insert approved posts"
 on public.match_posts
 for insert
 with check (
   owner_id = auth.uid()
-  and status = 'pending'
+  and status = 'approved'
   and exists (
     select 1
     from public.teams
@@ -109,16 +169,13 @@ with check (
   )
 );
 
-create policy "owners can update their non-approved posts"
+create policy "owners can hide or restore their posts"
 on public.match_posts
 for update
-using (
-  owner_id = auth.uid()
-  and status in ('pending', 'rejected')
-)
+using (owner_id = auth.uid())
 with check (
   owner_id = auth.uid()
-  and status in ('pending', 'rejected')
+  and status in ('approved', 'hidden')
   and exists (
     select 1
     from public.teams
@@ -126,6 +183,11 @@ with check (
       and teams.owner_id = auth.uid()
   )
 );
+
+create policy "owners can delete their posts"
+on public.match_posts
+for delete
+using (owner_id = auth.uid());
 
 create policy "admins can update any post"
 on public.match_posts
@@ -136,4 +198,23 @@ with check (public.is_admin());
 create policy "admins can delete posts"
 on public.match_posts
 for delete
+using (public.is_admin());
+
+create policy "authenticated users can report approved posts once"
+on public.post_reports
+for insert
+with check (
+  reporter_id = auth.uid()
+  and
+  exists (
+    select 1
+    from public.match_posts
+    where match_posts.id = post_reports.post_id
+      and match_posts.status = 'approved'
+  )
+);
+
+create policy "admins can read reports"
+on public.post_reports
+for select
 using (public.is_admin());
