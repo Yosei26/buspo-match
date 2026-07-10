@@ -100,6 +100,7 @@ export const demoPosts: MatchPost[] = [
 export function filterApprovedDemoPosts(filters: { match_date: string; region: string; school_level: string; ball_type: string }) {
   return demoPosts
     .filter((post) => post.status === "approved")
+    .filter((post) => post.teams?.school_level !== "club_team")
     .filter((post) => (filters.match_date ? post.match_date === filters.match_date : true))
     .filter((post) => (filters.region ? post.region.includes(filters.region.trim()) : true))
     .filter((post) => (filters.school_level ? post.teams?.school_level === filters.school_level : true))

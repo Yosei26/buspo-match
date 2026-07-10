@@ -40,6 +40,10 @@ const initialPost = {
 
 const regionOptions = ["東京都", "神奈川県", "埼玉県", "千葉県", "茨城県", "栃木県", "群馬県", "山梨県"];
 const emptyFilters = { match_date: "", region: "", school_level: "", ball_type: "" };
+const categoryBySchoolLevel = {
+  junior_high: "中学野球",
+  high_school: "高校野球"
+};
 
 export default function HomePage() {
   const [session, setSession] = useState<Session | null>(null);
@@ -63,6 +67,7 @@ export default function HomePage() {
   const userEmail = user?.email ?? (isDevAuth ? "開発確認モードのテスト投稿者" : isDemo ? "demo-coach@example.com" : "");
   const isAdmin = user?.app_metadata?.role === "admin" || isDemo || isDevAuth;
   const primaryTeam = teams[0];
+  const hasActiveFilters = Object.values(filters).some(Boolean);
 
   useEffect(() => {
     if (!supabase) {
@@ -156,6 +161,7 @@ export default function HomePage() {
       return;
     }
     let visiblePosts = (data ?? []) as MatchPost[];
+    visiblePosts = visiblePosts.filter((post) => post.teams?.school_level !== "club_team");
     if (nextFilters.school_level) {
       visiblePosts = visiblePosts.filter((post) => post.teams?.school_level === nextFilters.school_level);
     }
@@ -425,7 +431,7 @@ export default function HomePage() {
           <div className="hero-main">
             <h1>野球部の練習試合相手を探す。</h1>
             <p>
-              顧問、保護者、チーム代表者が日程・地域・カテゴリで募集を確認できます。連絡先は公開せず、投稿は管理者承認後に公開します。
+              中学・高校の顧問、保護者、チーム代表者が日程・地域・区分で募集を確認できます。連絡先は公開せず、投稿は管理者承認後に公開します。
             </p>
             <div className="hero-actions">
               <a className="button" href="#search">
@@ -522,7 +528,6 @@ export default function HomePage() {
                 <option value="">すべての区分</option>
                 <option value="junior_high">中学</option>
                 <option value="high_school">高校</option>
-                <option value="club_team">クラブチーム</option>
               </select>
             </div>
             <div className="field">
@@ -554,7 +559,14 @@ export default function HomePage() {
 
         <section className="section">
           <h2>公開中の練習試合募集</h2>
-          <PostList posts={posts} />
+          <PostList
+            posts={posts}
+            emptyMessage={
+              hasActiveFilters
+                ? "条件に一致する募集はありません。条件を変えて検索してください。"
+                : "公開中の募集はまだありません。新しい募集が承認されるとここに表示されます。"
+            }
+          />
         </section>
 
         <section className="section cta-band">
@@ -609,14 +621,20 @@ export default function HomePage() {
                 </div>
 
                 <div className="field">
-                  <label>中学/高校/クラブチーム</label>
+                  <label>中学/高校</label>
                   <select
                     value={postForm.school_level}
-                    onChange={(event) => setPostForm({ ...postForm, school_level: event.target.value })}
+                    onChange={(event) => {
+                      const schoolLevel = event.target.value as "junior_high" | "high_school";
+                      setPostForm({
+                        ...postForm,
+                        school_level: schoolLevel,
+                        category: categoryBySchoolLevel[schoolLevel]
+                      });
+                    }}
                   >
                     <option value="junior_high">中学</option>
                     <option value="high_school">高校</option>
-                    <option value="club_team">クラブチーム</option>
                   </select>
                 </div>
 
@@ -745,9 +763,17 @@ export default function HomePage() {
   );
 }
 
-function PostList({ posts, showStatus = false }: { posts: MatchPost[]; showStatus?: boolean }) {
+function PostList({
+  posts,
+  showStatus = false,
+  emptyMessage
+}: {
+  posts: MatchPost[];
+  showStatus?: boolean;
+  emptyMessage?: string;
+}) {
   if (!posts.length) {
-    return <p className="empty">{showStatus ? "自分の投稿はまだありません。" : "公開中の募集はまだありません。"}</p>;
+    return <p className="empty">{emptyMessage ?? (showStatus ? "自分の投稿はまだありません。" : "公開中の募集はまだありません。")}</p>;
   }
 
   return (
@@ -760,12 +786,13 @@ function PostList({ posts, showStatus = false }: { posts: MatchPost[]; showStatu
               <div className="meta">
                 <span className="meta-item">試合希望日 {post.match_date}</span>
                 <span className="meta-item">地域 {post.region}</span>
-                <span className="meta-item">カテゴリ {post.category}</span>
                 {post.teams && (
-                  <span className="meta-item">
-                    {schoolLevelLabels[post.teams.school_level]} / {ballTypeLabels[post.teams.ball_type]}
-                  </span>
+                  <>
+                    <span className="meta-item">区分 {schoolLevelLabels[post.teams.school_level]}</span>
+                    <span className="meta-item">種別 {ballTypeLabels[post.teams.ball_type]}</span>
+                  </>
                 )}
+                <span className="meta-item contact-private">連絡先非公開</span>
               </div>
             </div>
             {showStatus && <span className={`badge ${post.status}`}>{statusLabels[post.status]}</span>}

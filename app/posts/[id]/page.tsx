@@ -13,6 +13,19 @@ import {
   statusLabels
 } from "@/lib/types";
 
+function extractField(text: string, labels: string[]) {
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  for (const label of labels) {
+    const found = lines.find((line) => line.startsWith(`${label}:`) || line.startsWith(`${label}：`));
+    if (found) return found.replace(new RegExp(`^${label}[:：]\\s*`), "").trim();
+  }
+  return "";
+}
+
+function valueOrUnset(value: string | null | undefined) {
+  return value?.trim() ? value : "未設定";
+}
+
 export default function PostDetailPage() {
   const params = useParams<{ id: string }>();
   const [post, setPost] = useState<MatchPost | null>(null);
@@ -67,7 +80,7 @@ export default function PostDetailPage() {
             <div className="actions">
               {isDemo && <span className="mode-pill">仮データ</span>}
               <span className={`badge ${post.status}`}>{statusLabels[post.status]}</span>
-              <span className="badge">連絡先非公開</span>
+              <span className="badge approved">連絡先非公開</span>
             </div>
             <h1>{post.teams?.name ?? "チーム名未設定"}</h1>
 
@@ -78,33 +91,52 @@ export default function PostDetailPage() {
               </div>
               <div className="detail-item">
                 <span>地域</span>
-                <strong>{post.region}</strong>
+                <strong>{valueOrUnset(post.region)}</strong>
               </div>
               <div className="detail-item">
-                <span>カテゴリ</span>
-                <strong>{post.category}</strong>
+                <span>区分</span>
+                <strong>{post.teams ? schoolLevelLabels[post.teams.school_level] : "未設定"}</strong>
               </div>
-              {post.teams && (
-                <div className="detail-item">
-                  <span>区分</span>
-                  <strong>{schoolLevelLabels[post.teams.school_level]} / {ballTypeLabels[post.teams.ball_type]}</strong>
-                </div>
-              )}
+              <div className="detail-item">
+                <span>硬式/軟式</span>
+                <strong>{post.teams ? ballTypeLabels[post.teams.ball_type] : "未設定"}</strong>
+              </div>
+              <div className="detail-item">
+                <span>時間帯</span>
+                <strong>{valueOrUnset(extractField(post.body, ["時間帯", "時間"]))}</strong>
+              </div>
+              <div className="detail-item">
+                <span>会場</span>
+                <strong>{valueOrUnset(extractField(post.body, ["会場"]))}</strong>
+              </div>
+              <div className="detail-item">
+                <span>希望する相手チーム</span>
+                <strong>{valueOrUnset(extractField(post.desired_conditions, ["希望する相手チーム"]))}</strong>
+              </div>
+              <div className="detail-item">
+                <span>試合形式</span>
+                <strong>{valueOrUnset(extractField(post.desired_conditions, ["試合形式", "形式"]))}</strong>
+              </div>
             </div>
 
             <section className="detail-section">
-              <h2>相手チームへの希望</h2>
-              <p className="body-text">{post.desired_conditions}</p>
+              <h2>補足</h2>
+              <p className="body-text">{valueOrUnset(extractField(post.body, ["補足"]) || post.body)}</p>
             </section>
 
             <section className="detail-section">
-              <h2>会場・時間・補足</h2>
-              <p className="body-text">{post.body}</p>
+              <h2>募集内容の原文</h2>
+              <p className="body-text">{valueOrUnset(`${post.desired_conditions}\n${post.body}`)}</p>
             </section>
 
             <p className="notice warn">
               連絡先は一般公開していません。問い合わせ導線は、管理者承認後に関係者だけへ開示する設計です。
             </p>
+            <div className="actions">
+              <Link className="button" href="/">
+                トップページへ戻る
+              </Link>
+            </div>
           </article>
         )}
       </div>

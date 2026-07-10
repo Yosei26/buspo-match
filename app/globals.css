@@ -426,6 +426,12 @@ button {
   font-weight: 700;
 }
 
+.contact-private {
+  background: #eef8ee;
+  border-color: #b9daba;
+  color: var(--accent-dark);
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -462,6 +468,7 @@ button {
   border: 1px dashed var(--line);
   color: var(--muted);
   background: rgba(255, 255, 255, 0.55);
+  line-height: 1.7;
 }
 
 .status-summary {
@@ -484,7 +491,7 @@ button {
 
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
