@@ -508,6 +508,157 @@ service cloud.firestore {
 - `createdAt` はWeb SDK側で `serverTimestamp()` を使うため、Rulesでは `request.time` と一致することを確認します。
 - `email` はFirebase Authのtoken上のemailと一致する場合のみ保存できます。
 
+## `/firebase-posts` Firebase募集一覧 最小確認版
+
+Buspo Match本体をすぐ置き換えず、Firebase版の募集一覧だけを新規ページ `/firebase-posts` として追加します。
+
+この段階の範囲:
+
+- 現行Supabase版トップページは変更しない。
+- Firestore collectionは `matchPosts` を使う。
+- `/firebase-posts` では `status == "approved"` の投稿だけを一覧表示する。
+- 投稿フォーム、編集、削除、通報はまだ作らない。
+- Firebase Admin SDKは使わず、Firebase Web SDKで未ログイン読み取りだけを確認する。
+- 連絡先は一般公開しない前提で、`ownerEmail` は画面に表示しない。
+
+### `matchPosts` の項目
+
+```ts
+type MatchPost = {
+  teamName: string;
+  region: string;
+  schoolLevel: "middle_school" | "high_school";
+  ballType: "hard" | "rubber";
+  matchDate: string; // YYYY-MM-DD
+  timeSlot: string;
+  venue: string;
+  opponentPreference: string;
+  gameFormat: string;
+  notes: string;
+  status: "approved" | "reported" | "hidden";
+  ownerUid: string;
+  ownerEmail: string;
+  reportCount: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+};
+```
+
+### Firebase Consoleで手入力するテストデータ例
+
+Firestore Databaseで `matchPosts` collectionを作り、任意のdocument IDで以下を追加します。
+
+| Field | Type | Value |
+| --- | --- | --- |
+| `teamName` | string | `青葉高校 野球部` |
+| `region` | string | `東京都` |
+| `schoolLevel` | string | `high_school` |
+| `ballType` | string | `hard` |
+| `matchDate` | string | `2026-08-20` |
+| `timeSlot` | string | `13:00開始` |
+| `venue` | string | `自校グラウンド` |
+| `opponentPreference` | string | `同程度のチーム、B戦可` |
+| `gameFormat` | string | `7イニング1試合` |
+| `notes` | string | `駐車場あり。雨天時は中止判断します。` |
+| `status` | string | `approved` |
+| `ownerUid` | string | `manual-test-owner` |
+| `ownerEmail` | string | `test-owner@example.invalid` |
+| `reportCount` | number | `0` |
+| `createdAt` | timestamp | Firebase Consoleのtimestamp入力 |
+| `updatedAt` | timestamp | Firebase Consoleのtimestamp入力 |
+
+中学軟式の例:
+
+| Field | Type | Value |
+| --- | --- | --- |
+| `teamName` | string | `みどり中学校 野球部` |
+| `region` | string | `神奈川県` |
+| `schoolLevel` | string | `middle_school` |
+| `ballType` | string | `rubber` |
+| `matchDate` | string | `2026-08-24` |
+| `timeSlot` | string | `午前` |
+| `venue` | string | `相手校希望` |
+| `opponentPreference` | string | `新チーム中心` |
+| `gameFormat` | string | `ダブルヘッダー相談可` |
+| `notes` | string | `会場をお持ちのチームを優先します。` |
+| `status` | string | `approved` |
+| `ownerUid` | string | `manual-test-owner-2` |
+| `ownerEmail` | string | `test-owner-2@example.invalid` |
+| `reportCount` | number | `0` |
+| `createdAt` | timestamp | Firebase Consoleのtimestamp入力 |
+| `updatedAt` | timestamp | Firebase Consoleのtimestamp入力 |
+
+`status` を `reported` または `hidden` にしたdocumentは、`/firebase-posts` には表示されないことを確認します。
+
+### Firebase Consoleに設定するFirestore Security Rules案
+
+`matchPosts` はこの段階では読み取り専用です。未ログインユーザーでも `approved` 投稿だけ読めます。書き込みはすべて禁止します。
+
+既存Rulesがある場合は、以下の `match /matchPosts/{postId}` ブロックを `match /databases/{database}/documents` の中に追加してください。
+
+```txt
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /matchPosts/{postId} {
+      allow read: if resource.data.status == "approved";
+      allow create, update, delete: if false;
+    }
+  }
+}
+```
+
+`firebaseTestWrites` のRulesと同時に使う場合の最小例:
+
+```txt
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    match /firebaseTestWrites/{writeId} {
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(["uid", "email", "message", "createdAt"])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.message is string
+        && request.resource.data.message.size() > 0
+        && request.resource.data.message.size() <= 120
+        && request.resource.data.createdAt == request.time;
+
+      allow read: if signedIn()
+        && resource.data.uid == request.auth.uid;
+
+      allow update, delete: if false;
+    }
+
+    match /matchPosts/{postId} {
+      allow read: if resource.data.status == "approved";
+      allow create, update, delete: if false;
+    }
+  }
+}
+```
+
+確認手順:
+
+1. Firebase Consoleで上記Rulesを公開する。
+2. Firebase Consoleで `matchPosts` に `approved` のテストデータを追加する。
+3. `http://localhost:3000/firebase-posts` を開く。
+4. 未ログイン状態でも `approved` の募集だけ表示されることを確認する。
+5. `status` が `reported` または `hidden` のdocumentを追加し、一覧に表示されないことを確認する。
+6. Firestore Console以外からの書き込みはRulesで拒否される前提であることを確認する。
+
+確認結果:
+
+- 2026-07-17: `/firebase-posts` でFirestore `matchPosts` の `status == "approved"` 投稿が表示されることを確認済み。
+- 同確認では投稿フォーム、編集、削除、通報はまだ実装していない。
+- 現行Supabase版トップページの本番挙動には触れていない。
+
 ## Vercelに登録する環境変数
 
 ### ブラウザ公開用
