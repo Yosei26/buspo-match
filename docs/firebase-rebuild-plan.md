@@ -437,6 +437,77 @@ pnpm run dev
 - ポップアップが開かない場合:
   ブラウザのポップアップブロックを確認してください。モバイル中心で運用する場合は、将来 `signInWithRedirect` 方式も検討します。
 
+## `/firebase-test` Firestore最小読み書き確認
+
+Googleログイン確認後の次段階として、`/firebase-test` にFirestoreの最小読み書き確認欄を追加します。
+
+この確認の範囲:
+
+- Googleログイン済みユーザーだけが実行できる。
+- テスト用コレクション `firebaseTestWrites` だけを使う。
+- 書き込む内容は `uid`、`email`、`message`、`createdAt` のみ。
+- 読み込みは自分の `uid` と一致するテスト書き込みだけに限定する。
+- Buspo Match本体の `teams`、`matchPosts`、通報データには触れない。
+- Firebase Admin SDKは使わず、Firebase Web SDKだけで確認する。
+
+画面での確認手順:
+
+1. `pnpm run dev` を起動する。
+2. `http://localhost:3000/firebase-test` を開く。
+3. Googleログインする。
+4. 「Firestore読み書き確認」のテストメッセージを入力する。
+5. 「Firestoreにテスト保存」を押す。
+6. 自分のテスト書き込み一覧に、保存したメッセージとemail、保存時刻が表示されることを確認する。
+7. 別ユーザーでログインした場合、他ユーザーのテスト書き込みが表示されないことを確認する。
+
+確認結果:
+
+- 2026-07-17: `/firebase-test` でGoogleログイン後、`firebaseTestWrites` にテスト書き込みを保存できることを確認済み。
+- 2026-07-17: `/firebase-test` でログイン中ユーザー本人の `firebaseTestWrites` だけを読み込んで表示できることを確認済み。
+- 同確認ではBuspo Match本体の `teams`、`matchPosts`、通報データには触れていない。
+
+### Firebase Consoleに設定するFirestore Security Rules
+
+Firebase ConsoleのFirestore Database > Rulesに、少なくとも以下の `firebaseTestWrites` ルールを含めます。
+
+既存のRulesがある場合は、`match /firebaseTestWrites/{writeId}` ブロックを `match /databases/{database}/documents` の中に追加してください。
+
+```txt
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    match /firebaseTestWrites/{writeId} {
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(["uid", "email", "message", "createdAt"])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.message is string
+        && request.resource.data.message.size() > 0
+        && request.resource.data.message.size() <= 120
+        && request.resource.data.createdAt == request.time;
+
+      allow read: if signedIn()
+        && resource.data.uid == request.auth.uid;
+
+      allow update, delete: if false;
+    }
+  }
+}
+```
+
+注意:
+
+- `firebaseTestWrites` は接続確認専用です。本番の募集投稿データには使いません。
+- このRulesは「自分のテスト書き込みだけ読める」ことを確認するための最小案です。
+- 既存Rulesを上書きする場合は、他のコレクションに対するRulesを消さないよう注意してください。
+- `createdAt` はWeb SDK側で `serverTimestamp()` を使うため、Rulesでは `request.time` と一致することを確認します。
+- `email` はFirebase Authのtoken上のemailと一致する場合のみ保存できます。
+
 ## Vercelに登録する環境変数
 
 ### ブラウザ公開用
