@@ -659,6 +659,291 @@ service cloud.firestore {
 - 同確認では投稿フォーム、編集、削除、通報はまだ実装していない。
 - 現行Supabase版トップページの本番挙動には触れていない。
 
+## `/firebase-posts` Googleログイン投稿フォーム
+
+Firebase版の次段階として、`/firebase-posts` にGoogleログイン済みユーザー用の投稿フォームを追加します。
+
+この段階の範囲:
+
+- 現行Supabase版トップページは変更しない。
+- 未ログイン時は投稿フォームを表示せず、「Googleログインすると募集を投稿できます」と表示する。
+- Googleログイン済みユーザーだけ投稿フォームを表示する。
+- 投稿時はFirestore `matchPosts` に保存する。
+- 保存時の `status` は `approved` とし、投稿後すぐ一覧に表示する。
+- `ownerUid` はFirebase Authの `uid`、`ownerEmail` はFirebase Authの `email` を使う。
+- `reportCount` は `0` で保存する。
+- `createdAt` / `updatedAt` は `serverTimestamp()` を使う。
+- メールアドレス、電話番号、LINE ID、SNS IDらしき文字列が本文系項目に含まれる場合は投稿不可にする。
+
+投稿フォーム項目:
+
+- チーム名
+- 地域
+- 中学/高校
+- 硬式/軟式
+- 試合希望日
+- 時間帯
+- 会場
+- 希望する相手チーム
+- 試合形式
+- 補足
+
+### 投稿フォーム用 Firestore Security Rules案
+
+`matchPosts` の読み取りは未ログインでも `approved` のみ許可し、作成はログイン済みユーザーだけに限定します。更新・削除はこの段階ではまだ禁止します。
+
+```txt
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function validSchoolLevel(value) {
+      return value in ["middle_school", "high_school"];
+    }
+
+    function validBallType(value) {
+      return value in ["hard", "rubber"];
+    }
+
+    function hasNoContactText(text) {
+      return !(
+        text.matches(".*[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}.*") ||
+        text.matches(".*0[0-9]{1,4}[- ]?[0-9]{1,4}[- ]?[0-9]{3,4}.*") ||
+        text.matches(".*line[ ]*(id)?[ ]*[:：]?[ ]*[@A-Za-z0-9._-]{3,}.*") ||
+        text.matches(".*(@[A-Za-z0-9_]{3,}|(instagram|twitter|x|tiktok|facebook|sns)[ ]*(id|アカウント)?[ ]*[:：][ ]*[@A-Za-z0-9._-]{3,}).*")
+      );
+    }
+
+    match /matchPosts/{postId} {
+      allow read: if resource.data.status == "approved";
+
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly([
+          "teamName",
+          "region",
+          "schoolLevel",
+          "ballType",
+          "matchDate",
+          "timeSlot",
+          "venue",
+          "opponentPreference",
+          "gameFormat",
+          "notes",
+          "status",
+          "ownerUid",
+          "ownerEmail",
+          "reportCount",
+          "createdAt",
+          "updatedAt"
+        ])
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerEmail == request.auth.token.email
+        && request.resource.data.status == "approved"
+        && request.resource.data.reportCount == 0
+        && validSchoolLevel(request.resource.data.schoolLevel)
+        && validBallType(request.resource.data.ballType)
+        && request.resource.data.teamName is string
+        && request.resource.data.teamName.size() > 0
+        && request.resource.data.region is string
+        && request.resource.data.region.size() > 0
+        && request.resource.data.matchDate is string
+        && request.resource.data.matchDate.size() > 0
+        && request.resource.data.timeSlot is string
+        && request.resource.data.venue is string
+        && request.resource.data.opponentPreference is string
+        && request.resource.data.gameFormat is string
+        && request.resource.data.notes is string
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && hasNoContactText(
+          request.resource.data.timeSlot + " " +
+          request.resource.data.venue + " " +
+          request.resource.data.opponentPreference + " " +
+          request.resource.data.gameFormat + " " +
+          request.resource.data.notes
+        );
+
+      allow update, delete: if false;
+    }
+  }
+}
+```
+
+`firebaseTestWrites` と同時に使う場合は、既存の `firebaseTestWrites` ブロックを消さず、上記の `match /matchPosts/{postId}` ブロックだけを差し替えてください。
+
+### Missing or insufficient permissions の調査結果
+
+`/firebase-posts` の投稿時に `Missing or insufficient permissions` が出る場合、主な原因はFirestore Console側のRulesが前段階の読み取り専用Rulesのままになっていることです。
+
+前段階のRulesには以下が含まれていました。
+
+```txt
+match /matchPosts/{postId} {
+  allow read: if resource.data.status == "approved";
+  allow create, update, delete: if false;
+}
+```
+
+この状態では、アプリ側の保存データが正しくても `create` は必ず拒否されます。
+
+アプリ側が実際に `matchPosts` へ保存するデータ:
+
+- `teamName`: string
+- `region`: string
+- `schoolLevel`: `"middle_school"` または `"high_school"`
+- `ballType`: `"hard"` または `"rubber"`
+- `matchDate`: string
+- `timeSlot`: string
+- `venue`: string
+- `opponentPreference`: string
+- `gameFormat`: string
+- `notes`: string
+- `status`: `"approved"`
+- `ownerUid`: Firebase Authの `user.uid`
+- `ownerEmail`: Firebase Authの `user.email`
+- `reportCount`: `0`
+- `createdAt`: `serverTimestamp()`
+- `updatedAt`: `serverTimestamp()`
+
+`serverTimestamp()` はRules評価時に `request.time` として扱われるため、`createdAt == request.time` と `updatedAt == request.time` の条件で許可できます。
+
+Firebase Consoleに貼り付ける完全Rules全文:
+
+```txt
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function validSchoolLevel(value) {
+      return value in ["middle_school", "high_school"];
+    }
+
+    function validBallType(value) {
+      return value in ["hard", "rubber"];
+    }
+
+    function hasNoContactText(text) {
+      return !(
+        text.matches(".*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}.*") ||
+        text.matches(".*0[0-9]{1,4}[- ]?[0-9]{1,4}[- ]?[0-9]{3,4}.*") ||
+        text.matches(".*line[ ]*(id)?[ ]*[:：]?[ ]*[@A-Za-z0-9._-]{3,}.*") ||
+        text.matches(".*(@[A-Za-z0-9_]{3,}|(instagram|twitter|x|tiktok|facebook|sns)[ ]*(id|アカウント)?[ ]*[:：]?[ ]*[@A-Za-z0-9._-]{3,}).*")
+      );
+    }
+
+    match /firebaseTestWrites/{writeId} {
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(["uid", "email", "message", "createdAt"])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.message is string
+        && request.resource.data.message.size() > 0
+        && request.resource.data.message.size() <= 120
+        && request.resource.data.createdAt == request.time;
+
+      allow read: if signedIn()
+        && resource.data.uid == request.auth.uid;
+
+      allow update, delete: if false;
+    }
+
+    match /matchPosts/{postId} {
+      allow read: if resource.data.status == "approved";
+
+      allow create: if signedIn()
+        && request.auth.token.email is string
+        && request.resource.data.keys().hasOnly([
+          "teamName",
+          "region",
+          "schoolLevel",
+          "ballType",
+          "matchDate",
+          "timeSlot",
+          "venue",
+          "opponentPreference",
+          "gameFormat",
+          "notes",
+          "status",
+          "ownerUid",
+          "ownerEmail",
+          "reportCount",
+          "createdAt",
+          "updatedAt"
+        ])
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerEmail == request.auth.token.email
+        && request.resource.data.status == "approved"
+        && request.resource.data.reportCount == 0
+        && validSchoolLevel(request.resource.data.schoolLevel)
+        && validBallType(request.resource.data.ballType)
+        && request.resource.data.teamName is string
+        && request.resource.data.teamName.size() > 0
+        && request.resource.data.region is string
+        && request.resource.data.region.size() > 0
+        && request.resource.data.matchDate is string
+        && request.resource.data.matchDate.size() > 0
+        && request.resource.data.timeSlot is string
+        && request.resource.data.timeSlot.size() > 0
+        && request.resource.data.venue is string
+        && request.resource.data.venue.size() > 0
+        && request.resource.data.opponentPreference is string
+        && request.resource.data.opponentPreference.size() > 0
+        && request.resource.data.gameFormat is string
+        && request.resource.data.gameFormat.size() > 0
+        && request.resource.data.notes is string
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && hasNoContactText(
+          request.resource.data.timeSlot + " " +
+          request.resource.data.venue + " " +
+          request.resource.data.opponentPreference + " " +
+          request.resource.data.gameFormat + " " +
+          request.resource.data.notes
+        );
+
+      allow update, delete: if false;
+    }
+  }
+}
+```
+
+確認する不一致ポイント:
+
+- `matchPosts` のRulesが `allow create, update, delete: if false;` のままなら投稿は拒否される。
+- `ownerUid` は `request.auth.uid` と一致必須。
+- `ownerEmail` は `request.auth.token.email` と一致必須。
+- `status` は `"approved"` のみ許可。
+- `reportCount` は `0` のみ許可。
+- `schoolLevel` は `"middle_school"` または `"high_school"` のみ許可。
+- `ballType` は `"hard"` または `"rubber"` のみ許可。
+- `createdAt` / `updatedAt` は `serverTimestamp()` で保存し、Rules側では `request.time` と比較する。
+
+確認手順:
+
+1. Firebase Consoleで上記Rulesを公開する。
+2. `/firebase-posts` を開く。
+3. 未ログイン状態では投稿フォームが表示されず、「Googleログインすると募集を投稿できます」と表示されることを確認する。
+4. Googleログインする。
+5. 投稿フォームが表示されることを確認する。
+6. 必須項目を入力して投稿する。
+7. 投稿後、一覧に即時表示されることを確認する。
+8. 本文系項目にメールアドレス、電話番号、LINE ID、SNS IDらしき文字列を入れると投稿できないことを確認する。
+9. Firestore Consoleで `ownerUid`、`ownerEmail`、`status: "approved"`、`reportCount: 0`、`createdAt`、`updatedAt` が保存されていることを確認する。
+
+確認結果:
+
+- 2026-07-17: `/firebase-posts` でGoogleログイン済みユーザーがFirestore `matchPosts` に投稿できることを確認済み。
+- 2026-07-17: 投稿後、`status: "approved"` の投稿が `/firebase-posts` の一覧に即時表示されることを確認済み。
+- 同確認では `ownerUid` はFirebase Authの `uid`、`ownerEmail` はFirebase Authの `email`、`reportCount` は `0` として保存する。
+
 ## Vercelに登録する環境変数
 
 ### ブラウザ公開用

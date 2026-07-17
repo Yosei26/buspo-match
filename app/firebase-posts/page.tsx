@@ -1,9 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { collection, getDocs, query, where, type Timestamp } from "firebase/firestore";
-import { firebaseDb, hasFirebaseConfig } from "@/lib/firebase";
+import { type FormEvent, useEffect, useState } from "react";
+import type { User } from "firebase/auth";
+import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import { addDoc, collection, getDocs, query, serverTimestamp, where, type Timestamp } from "firebase/firestore";
+import { firebaseAuth, firebaseDb, googleAuthProvider, hasFirebaseConfig } from "@/lib/firebase";
+import { contactInfoError } from "@/lib/safety";
 
 type FirebaseMatchPost = {
   id: string;
@@ -33,6 +36,19 @@ const schoolLevelLabels: Record<FirebaseMatchPost["schoolLevel"], string> = {
 const ballTypeLabels: Record<FirebaseMatchPost["ballType"], string> = {
   hard: "硬式",
   rubber: "軟式"
+};
+
+const initialPostForm = {
+  teamName: "",
+  region: "",
+  schoolLevel: "high_school" as FirebaseMatchPost["schoolLevel"],
+  ballType: "hard" as FirebaseMatchPost["ballType"],
+  matchDate: "",
+  timeSlot: "",
+  venue: "",
+  opponentPreference: "",
+  gameFormat: "",
+  notes: ""
 };
 
 function asString(value: unknown, fallback = "") {
@@ -70,12 +86,25 @@ function normalizePost(id: string, data: Record<string, unknown>): FirebaseMatch
 }
 
 export default function FirebasePostsPage() {
+  const [user, setUser] = useState<User | null>(null);
   const [posts, setPosts] = useState<FirebaseMatchPost[]>([]);
   const [message, setMessage] = useState("");
+  const [formError, setFormError] = useState("");
+  const [postForm, setPostForm] = useState(initialPostForm);
   const [loading, setLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [posting, setPosting] = useState(false);
 
   useEffect(() => {
     loadApprovedPosts();
+    if (!firebaseAuth) {
+      setAuthLoading(false);
+      return;
+    }
+    return onAuthStateChanged(firebaseAuth, (nextUser) => {
+      setUser(nextUser);
+      setAuthLoading(false);
+    });
   }, []);
 
   async function loadApprovedPosts() {
@@ -102,6 +131,102 @@ export default function FirebasePostsPage() {
     }
   }
 
+  async function handleGoogleSignIn() {
+    if (!firebaseAuth) {
+      setMessage("Firebase Web SDK設定が不足しているため、Googleログインを開始できません。");
+      return;
+    }
+
+    setMessage("");
+    try {
+      await signInWithPopup(firebaseAuth, googleAuthProvider);
+      setMessage("Googleログインに成功しました。募集を投稿できます。");
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "不明なエラー";
+      setMessage(`Googleログインに失敗しました: ${detail}`);
+    }
+  }
+
+  async function handleSignOut() {
+    if (!firebaseAuth) return;
+
+    setMessage("");
+    try {
+      await signOut(firebaseAuth);
+      setMessage("ログアウトしました。");
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "不明なエラー";
+      setMessage(`ログアウトに失敗しました: ${detail}`);
+    }
+  }
+
+  async function createPost(event: FormEvent) {
+    event.preventDefault();
+    if (!firebaseDb || !user) {
+      setFormError("募集投稿にはGoogleログインが必要です。");
+      return;
+    }
+    if (!user.email) {
+      setFormError("Googleアカウントのメールアドレスを確認できないため投稿できません。");
+      return;
+    }
+
+    const requiredFields: Array<[string, string]> = [
+      ["チーム名", postForm.teamName],
+      ["地域", postForm.region],
+      ["試合希望日", postForm.matchDate],
+      ["時間帯", postForm.timeSlot],
+      ["会場", postForm.venue],
+      ["希望する相手チーム", postForm.opponentPreference],
+      ["試合形式", postForm.gameFormat]
+    ];
+    const missing = requiredFields.filter(([, value]) => !value.trim()).map(([label]) => label);
+    if (missing.length) {
+      setFormError(`未入力の必須項目があります: ${missing.join("、")}`);
+      return;
+    }
+
+    const contactError = contactInfoError(
+      [postForm.opponentPreference, postForm.gameFormat, postForm.notes, postForm.venue, postForm.timeSlot].join("\n")
+    );
+    if (contactError) {
+      setFormError(contactError);
+      return;
+    }
+
+    setPosting(true);
+    setFormError("");
+    setMessage("");
+    try {
+      await addDoc(collection(firebaseDb, "matchPosts"), {
+        teamName: postForm.teamName.trim(),
+        region: postForm.region.trim(),
+        schoolLevel: postForm.schoolLevel,
+        ballType: postForm.ballType,
+        matchDate: postForm.matchDate,
+        timeSlot: postForm.timeSlot.trim(),
+        venue: postForm.venue.trim(),
+        opponentPreference: postForm.opponentPreference.trim(),
+        gameFormat: postForm.gameFormat.trim(),
+        notes: postForm.notes.trim(),
+        status: "approved",
+        ownerUid: user.uid,
+        ownerEmail: user.email,
+        reportCount: 0,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      setPostForm(initialPostForm);
+      setMessage("募集を投稿しました。approvedとして保存され、一覧に表示されます。");
+      await loadApprovedPosts();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "不明なエラー";
+      setFormError(`募集を投稿できませんでした: ${detail}`);
+    } finally {
+      setPosting(false);
+    }
+  }
+
   return (
     <main className="shell">
       <header className="topbar">
@@ -116,6 +241,11 @@ export default function FirebasePostsPage() {
           <Link className="admin-link" href="/firebase-test">
             Firebase接続確認
           </Link>
+          {user ? (
+            <button className="button secondary" type="button" onClick={handleSignOut}>
+              ログアウト
+            </button>
+          ) : null}
         </nav>
       </header>
 
@@ -125,11 +255,11 @@ export default function FirebasePostsPage() {
             <div>
               <h1>Firebase版 募集一覧</h1>
               <p>
-                Firestoreの `matchPosts` から `status == "approved"` の投稿だけを読み込む最小確認ページです。
-                投稿フォームはまだ作っていません。
+                Firestoreの `matchPosts` から `status == "approved"` の投稿だけを読み込みます。
+                Googleログイン後に募集を投稿できます。
               </p>
             </div>
-            <span className="mode-pill">読み取り専用</span>
+            <span className="mode-pill">Firebase確認版</span>
           </div>
 
           <div className="summary-box">
@@ -147,10 +277,152 @@ export default function FirebasePostsPage() {
                 <dt>対象collection</dt>
                 <dd>matchPosts</dd>
               </div>
+              <div>
+                <dt>ログイン状態</dt>
+                <dd>{authLoading ? "確認中" : user ? `${user.displayName ?? "Googleユーザー"} としてログイン中` : "未ログイン"}</dd>
+              </div>
             </dl>
           </div>
 
           {message && <p className="notice error">{message}</p>}
+        </section>
+
+        <section className="section panel">
+          <div className="section-head">
+            <div>
+              <h2>募集を投稿する</h2>
+              <p>Googleログイン済みユーザーだけが、Firestoreの `matchPosts` にapproved投稿を保存できます。</p>
+            </div>
+          </div>
+
+          {!user ? (
+            <div className="grid">
+              <p className="notice warn">Googleログインすると募集を投稿できます。</p>
+              <div className="actions">
+                <button className="button" type="button" onClick={handleGoogleSignIn} disabled={!firebaseAuth || authLoading}>
+                  Googleでログイン
+                </button>
+              </div>
+            </div>
+          ) : (
+            <form className="match-form" onSubmit={createPost}>
+              <div className="form-grid">
+                <div className="field full-span">
+                  <label htmlFor="teamName">チーム名</label>
+                  <input
+                    id="teamName"
+                    value={postForm.teamName}
+                    onChange={(event) => setPostForm({ ...postForm, teamName: event.target.value })}
+                    placeholder="例: 青葉高校 野球部"
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="region">地域</label>
+                  <input
+                    id="region"
+                    value={postForm.region}
+                    onChange={(event) => setPostForm({ ...postForm, region: event.target.value })}
+                    placeholder="例: 東京都"
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="schoolLevel">中学/高校</label>
+                  <select
+                    id="schoolLevel"
+                    value={postForm.schoolLevel}
+                    onChange={(event) =>
+                      setPostForm({ ...postForm, schoolLevel: event.target.value as FirebaseMatchPost["schoolLevel"] })
+                    }
+                  >
+                    <option value="middle_school">中学</option>
+                    <option value="high_school">高校</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="ballType">硬式/軟式</label>
+                  <select
+                    id="ballType"
+                    value={postForm.ballType}
+                    onChange={(event) => setPostForm({ ...postForm, ballType: event.target.value as FirebaseMatchPost["ballType"] })}
+                  >
+                    <option value="hard">硬式</option>
+                    <option value="rubber">軟式</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="matchDate">試合希望日</label>
+                  <input
+                    id="matchDate"
+                    type="date"
+                    value={postForm.matchDate}
+                    onChange={(event) => setPostForm({ ...postForm, matchDate: event.target.value })}
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="timeSlot">時間帯</label>
+                  <input
+                    id="timeSlot"
+                    value={postForm.timeSlot}
+                    onChange={(event) => setPostForm({ ...postForm, timeSlot: event.target.value })}
+                    placeholder="例: 13:00開始、午前"
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="venue">会場</label>
+                  <input
+                    id="venue"
+                    value={postForm.venue}
+                    onChange={(event) => setPostForm({ ...postForm, venue: event.target.value })}
+                    placeholder="例: 自校グラウンド"
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="opponentPreference">希望する相手チーム</label>
+                  <input
+                    id="opponentPreference"
+                    value={postForm.opponentPreference}
+                    onChange={(event) => setPostForm({ ...postForm, opponentPreference: event.target.value })}
+                    placeholder="例: 同程度のチーム、B戦可"
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="gameFormat">試合形式</label>
+                  <input
+                    id="gameFormat"
+                    value={postForm.gameFormat}
+                    onChange={(event) => setPostForm({ ...postForm, gameFormat: event.target.value })}
+                    placeholder="例: 7イニング1試合"
+                    required
+                  />
+                </div>
+                <div className="field full-span">
+                  <label htmlFor="notes">補足</label>
+                  <textarea
+                    id="notes"
+                    value={postForm.notes}
+                    onChange={(event) => setPostForm({ ...postForm, notes: event.target.value })}
+                    placeholder="例: 駐車場あり。雨天時は中止判断します。"
+                  />
+                </div>
+              </div>
+
+              <p className="notice warn">
+                連絡先は一般公開しない運用です。メールアドレス、電話番号、LINE ID、SNS IDらしき文字列は入力しないでください。
+              </p>
+              {formError && <p className="notice error">{formError}</p>}
+              <div className="actions">
+                <button className="button" disabled={posting || !firebaseDb}>
+                  募集を投稿する
+                </button>
+              </div>
+            </form>
+          )}
         </section>
 
         <section className="section">
