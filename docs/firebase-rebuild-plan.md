@@ -1333,6 +1333,109 @@ match /postReports/{reportId} {
 10. 投稿を「削除する」でFirestoreから削除できることを確認する。
 11. 一般ユーザーが `/firebase-posts` で `reported` / `hidden` 投稿を読めないことを確認する。
 
+## Vercel Preview確認準備
+
+Firebase版は `firebase-rebuild` ブランチのPreviewで確認し、現行Supabase版の `main` 本番公開には影響させません。VercelのEnvironment Variablesは、まずPreview環境に限定して設定します。
+
+### Vercel Previewに登録する環境変数
+
+ブラウザ公開用のFirebase Web SDK設定:
+
+| 変数名 | Vercelに入れる値 | 取得元 |
+| --- | --- | --- |
+| `NEXT_PUBLIC_FIREBASE_API_KEY` | Firebase Web Appの `apiKey` | Firebase Console > Project settings > General > Your apps > SDK setup |
+| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | Firebase Web Appの `authDomain` | 同上 |
+| `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | Firebase Web Appの `projectId` | 同上 |
+| `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` | Firebase Web Appの `storageBucket` | 同上 |
+| `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID` | Firebase Web Appの `messagingSenderId` | 同上 |
+| `NEXT_PUBLIC_FIREBASE_APP_ID` | Firebase Web Appの `appId` | 同上 |
+
+サーバー専用のFirebase Admin SDK設定:
+
+| 変数名 | Vercelに入れる値 | 取得元 |
+| --- | --- | --- |
+| `FIREBASE_PROJECT_ID` | Service Account JSONの `project_id` | Firebase Console > Project settings > Service accounts > Generate new private key |
+| `FIREBASE_CLIENT_EMAIL` | Service Account JSONの `client_email` | 同上 |
+| `FIREBASE_PRIVATE_KEY` | Service Account JSONの `private_key` | 同上 |
+| `FIREBASE_ADMIN_EMAILS` | `/firebase-admin` を許可するGoogleアカウントのemailをカンマ区切りで指定 | 運用側で決める。例: `admin@example.invalid,moderator@example.invalid` |
+| `REPORT_THRESHOLD` | 通報で `reported` にする件数。初期値は `3` | 運用側で決める |
+
+注意:
+
+- `FIREBASE_PROJECT_ID`、`FIREBASE_CLIENT_EMAIL`、`FIREBASE_PRIVATE_KEY`、`FIREBASE_ADMIN_EMAILS`、`REPORT_THRESHOLD` には `NEXT_PUBLIC_` を付けません。
+- `FIREBASE_PRIVATE_KEY` はGitHubに入れず、VercelのEnvironment Variablesとローカルの `.env.local` のみに置きます。
+- Vercelで設定するEnvironmentは、Firebase Preview確認中は原則 `Preview` にします。`Production` へ反映するのは本番切替判断後にします。
+- 同じVercel Projectで `main` 本番を運用している場合、Firebase用のPreview変数がSupabase版のProduction設定を上書きしないように確認します。
+- Firebase Hostingは使わず、公開確認はVercel Preview URLで行います。
+
+### Firebase ConsoleのAuthorized domains
+
+Firebase AuthenticationのGoogleログインをPreview URLで使うには、Firebase Console > Authentication > Settings > Authorized domains に確認対象ドメインを追加します。
+
+追加対象:
+
+- `localhost`
+- 現行本番URLで確認する場合は `buspo-match.vercel.app`
+- Vercel Preview URLのホスト名。例: `<project>-git-firebase-rebuild-<team>.vercel.app`
+- 独自のPreview/Stagingドメインを使う場合はそのホスト名
+
+登録時の注意:
+
+- `https://` は付けません。
+- `/firebase-test` などのパスは付けません。
+- Preview URLが変わる場合は、新しいPreview URLのホスト名も追加します。
+
+### `/firebase-test` Preview確認手順
+
+1. Vercel Preview URLの `/firebase-test` を開く。
+2. Firebase Web SDK設定が読み込み済みと表示されることを確認する。
+3. 「Googleでログイン」を押す。
+4. ログイン後、`uid`、`displayName`、`email` が表示されることを確認する。
+5. Firestore読み書き確認欄で `firebaseTestWrites` にテスト保存できることを確認する。
+6. 表示される書き込み一覧がログイン中ユーザー本人のものだけであることを確認する。
+7. ログアウトできることを確認する。
+
+### `/firebase-posts` Preview確認手順
+
+1. Vercel Preview URLの `/firebase-posts` を開く。
+2. 未ログインでも `status == "approved"` の募集だけ表示されることを確認する。
+3. 未ログイン時は投稿フォームが表示されず、「Googleログインすると募集を投稿できます」と表示されることを確認する。
+4. Googleログインする。
+5. 投稿フォームから募集を投稿し、`status: "approved"` で一覧に即時表示されることを確認する。
+6. メールアドレス、電話番号、LINE ID、SNS IDらしき文字列を本文系項目に入れると投稿不可になることを確認する。
+7. 自分の投稿にだけ「非公開にする」「削除する」ボタンが表示されることを確認する。
+8. 非公開化すると `status: "hidden"` になり、公開一覧から消えることを確認する。
+9. 削除するとFirestoreから投稿が削除され、公開一覧から消えることを確認する。
+10. 他人の投稿には投稿者操作ボタンが表示されないことを確認する。
+11. ログイン済みで他人の投稿だけ通報できることを確認する。
+12. 通報後、`postReports` に記録され、`reportCount` が増えることを確認する。
+13. 同じユーザーによる同一投稿の重複通報が拒否されることを確認する。
+14. 通報件数が `REPORT_THRESHOLD` 以上になると `status: "reported"` になり、公開一覧から消えることを確認する。
+
+### `/firebase-admin` Preview確認手順
+
+1. Vercel PreviewのEnvironment Variablesに `FIREBASE_ADMIN_EMAILS` を設定する。
+2. `FIREBASE_ADMIN_EMAILS` に含まれるGoogleアカウントでログインできる状態にする。
+3. Vercel Preview URLの `/firebase-admin` を開く。
+4. 管理者emailでは `reported` / `hidden` の投稿一覧が表示されることを確認する。
+5. 管理者emailでは投稿を `approved` に戻せることを確認する。
+6. 管理者emailでは投稿を `hidden` にできることを確認する。
+7. 管理者emailでは投稿を削除できることを確認する。
+8. `FIREBASE_ADMIN_EMAILS` に含まれないGoogleアカウントでは、管理対象を読み込めず管理操作もできないことを確認する。
+9. `/firebase-posts` の公開一覧が `approved` のみ表示する状態と整合していることを確認する。
+
+### Preview確認前の安全チェック
+
+- [ ] `firebase-rebuild` ブランチのVercel Previewで確認している。
+- [ ] `main` のSupabase本番公開を変更していない。
+- [ ] `.env.local` はGit管理対象外である。
+- [ ] Firebase Admin SDK秘密情報はGitHubに入れていない。
+- [ ] Firebase Admin SDK秘密情報に `NEXT_PUBLIC_` を付けていない。
+- [ ] Firestore Security Rulesは、未ログインユーザーが `approved` 投稿だけ読める設定になっている。
+- [ ] `reported` / `hidden` 投稿は一般ユーザーから読めない。
+- [ ] 通報と管理操作はVercel API Route + Firebase Admin SDK経由で行う。
+- [ ] `pnpm run build` が成功している。
+
 ## Vercelに登録する環境変数
 
 ### ブラウザ公開用
