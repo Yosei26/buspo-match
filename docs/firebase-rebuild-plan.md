@@ -1068,6 +1068,181 @@ service cloud.firestore {
 - 2026-07-18: `/firebase-posts` でGoogleログイン済みユーザーが自分の投稿だけ削除できることを確認済み。
 - 非公開化・削除後、`status == "approved"` の一覧が再読み込みされ、対象投稿が一覧から消えることを確認済み。
 
+## `/firebase-posts` 通報機能
+
+Firebase版の次段階として、`/firebase-posts` の公開投稿に通報機能を追加します。
+
+この段階の範囲:
+
+- `status == "approved"` の投稿に通報導線を表示する。
+- 未ログイン時は通報ボタンを表示せず、「ログインすると通報できます」と表示する。
+- 自分の投稿は通報できない。
+- 通報はクライアントからFirestoreへ直接書き込まない。
+- Vercel API Route `POST /api/firebase-posts/[id]/report` でFirebase ID tokenを検証する。
+- API Route内でFirebase Admin SDKを使い、Firestore transactionで `postReports` 作成と `matchPosts.reportCount` 更新を行う。
+- 通報collection名は `postReports` とする。
+- 同じユーザーが同じ投稿を複数回通報できないよう、`postReports` のdocument IDは `${postId}_${reporterUid}` とする。
+- 通報3件以上で `matchPosts.status` を `"reported"` に変更する。
+- 一覧は `status == "approved"` のみ表示するため、`reported` になった投稿は一覧から消える。
+
+API Routeで使うサーバー側環境変数:
+
+```bash
+FIREBASE_PROJECT_ID=...
+FIREBASE_CLIENT_EMAIL=...
+FIREBASE_PRIVATE_KEY=...
+REPORT_THRESHOLD=3
+```
+
+ローカル確認用のFirebase Admin SDK環境変数取得手順:
+
+1. Firebase Consoleを開く。
+2. 対象Firebaseプロジェクトを選択する。
+3. Project settingsを開く。
+4. Service accountsタブを開く。
+5. Firebase Admin SDKのNode.jsを選択する。
+6. Generate new private keyを押して秘密鍵JSONをダウンロードする。
+7. ダウンロードしたJSONから以下を `.env.local` に転記する。
+   - `project_id` -> `FIREBASE_PROJECT_ID`
+   - `client_email` -> `FIREBASE_CLIENT_EMAIL`
+   - `private_key` -> `FIREBASE_PRIVATE_KEY`
+8. `private_key` は改行を `\n` の文字列として保持し、`.env.local` ではダブルクォートで囲む。
+9. `REPORT_THRESHOLD=3` を `.env.local` に追加する。
+10. `.env.local` がGit管理対象外であることを確認する。
+
+`.env.local` の例:
+
+```bash
+FIREBASE_PROJECT_ID=your-project-id
+FIREBASE_CLIENT_EMAIL=firebase-adminsdk-example@your-project-id.iam.gserviceaccount.com
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY\n-----END PRIVATE KEY-----\n"
+REPORT_THRESHOLD=3
+```
+
+注意:
+
+- Firebase Admin SDKの秘密情報はVercelのServer Environment Variablesにだけ登録する。
+- `FIREBASE_PRIVATE_KEY`、`FIREBASE_CLIENT_EMAIL`、`FIREBASE_PROJECT_ID` に `NEXT_PUBLIC_` を付けない。
+- クライアント側はFirebase ID tokenを `Authorization: Bearer <token>` でAPI Routeへ送るだけにする。
+
+通報機能用 Firestore Security Rules案:
+
+```txt
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function validSchoolLevel(value) {
+      return value in ["middle_school", "high_school"];
+    }
+
+    function validBallType(value) {
+      return value in ["hard", "rubber"];
+    }
+
+    function hasNoContactText(text) {
+      return !(
+        text.matches(".*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}.*") ||
+        text.matches(".*0[0-9]{1,4}[- ]?[0-9]{1,4}[- ]?[0-9]{3,4}.*") ||
+        text.matches(".*line[ ]*(id)?[ ]*[:：]?[ ]*[@A-Za-z0-9._-]{3,}.*") ||
+        text.matches(".*(@[A-Za-z0-9_]{3,}|(instagram|twitter|x|tiktok|facebook|sns)[ ]*(id|アカウント)?[ ]*[:：]?[ ]*[@A-Za-z0-9._-]{3,}).*")
+      );
+    }
+
+    match /firebaseTestWrites/{writeId} {
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(["uid", "email", "message", "createdAt"])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.message is string
+        && request.resource.data.message.size() > 0
+        && request.resource.data.message.size() <= 120
+        && request.resource.data.createdAt == request.time;
+
+      allow read: if signedIn()
+        && resource.data.uid == request.auth.uid;
+
+      allow update, delete: if false;
+    }
+
+    match /matchPosts/{postId} {
+      allow read: if resource.data.status == "approved";
+
+      allow create: if signedIn()
+        && request.auth.token.email is string
+        && request.resource.data.keys().hasOnly([
+          "teamName",
+          "region",
+          "schoolLevel",
+          "ballType",
+          "matchDate",
+          "timeSlot",
+          "venue",
+          "opponentPreference",
+          "gameFormat",
+          "notes",
+          "status",
+          "ownerUid",
+          "ownerEmail",
+          "reportCount",
+          "createdAt",
+          "updatedAt"
+        ])
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerEmail == request.auth.token.email
+        && request.resource.data.status == "approved"
+        && request.resource.data.reportCount == 0
+        && validSchoolLevel(request.resource.data.schoolLevel)
+        && validBallType(request.resource.data.ballType)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && hasNoContactText(
+          request.resource.data.timeSlot + " " +
+          request.resource.data.venue + " " +
+          request.resource.data.opponentPreference + " " +
+          request.resource.data.gameFormat + " " +
+          request.resource.data.notes
+        );
+
+      allow update: if signedIn()
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status"])
+        && request.resource.data.status == "hidden";
+
+      allow delete: if signedIn()
+        && resource.data.ownerUid == request.auth.uid;
+    }
+
+    match /postReports/{reportId} {
+      allow read, create, update, delete: if false;
+    }
+  }
+}
+```
+
+補足:
+
+- `postReports` はVercel API Route + Firebase Admin SDKだけが書き込む。
+- Firebase Admin SDKはSecurity Rulesをバイパスするため、クライアントからの直接書き込みは禁止してよい。
+- `reportCount` 更新と `status: "reported"` への変更もAPI Routeのtransaction内で行う。
+
+確認手順:
+
+1. Vercelまたはローカルのサーバー側環境変数に `FIREBASE_PROJECT_ID`、`FIREBASE_CLIENT_EMAIL`、`FIREBASE_PRIVATE_KEY`、`REPORT_THRESHOLD` を設定する。
+2. Firebase Consoleで上記Rulesを公開する。
+3. `/firebase-posts` を開く。
+4. 未ログイン状態では通報ボタンが表示されず、「ログインすると通報できます」と表示されることを確認する。
+5. Googleログインする。
+6. 他人の投稿に「通報する」ボタンが表示されることを確認する。
+7. 自分の投稿に「通報する」ボタンが表示されないことを確認する。
+8. 他人の投稿を通報し、`postReports` に `${postId}_${reporterUid}` のdocumentが作成されることを確認する。
+9. 同じユーザーで同じ投稿を再度通報すると拒否されることを確認する。
+10. 3件目の通報で `matchPosts.status` が `"reported"` になり、`/firebase-posts` の一覧から消えることを確認する。
+
 ## Vercelに登録する環境変数
 
 ### ブラウザ公開用

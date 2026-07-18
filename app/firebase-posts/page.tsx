@@ -276,6 +276,44 @@ export default function FirebasePostsPage() {
     }
   }
 
+  async function reportPost(post: FirebaseMatchPost) {
+    if (!user) {
+      setMessage("通報にはGoogleログインが必要です。");
+      return;
+    }
+    if (post.ownerUid === user.uid) {
+      setMessage("自分の投稿は通報できません。");
+      return;
+    }
+
+    const confirmed = window.confirm("この募集を通報しますか。通報が3件以上になると一覧から非表示になります。");
+    if (!confirmed) return;
+
+    setPostActionId(post.id);
+    setMessage("");
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(`/api/firebase-posts/${post.id}/report`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setMessage(result.error ?? "通報を保存できませんでした。");
+        return;
+      }
+      setMessage(result.message ?? "通報を受け付けました。");
+      await loadApprovedPosts();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "不明なエラー";
+      setMessage(`通報を保存できませんでした: ${detail}`);
+    } finally {
+      setPostActionId(null);
+    }
+  }
+
   return (
     <main className="shell">
       <header className="topbar">
@@ -555,6 +593,21 @@ export default function FirebasePostsPage() {
                       </button>
                     </div>
                   )}
+
+                  {!user ? (
+                    <p className="notice warn">ログインすると通報できます。</p>
+                  ) : user.uid !== post.ownerUid ? (
+                    <div className="actions">
+                      <button
+                        className="button secondary"
+                        type="button"
+                        onClick={() => reportPost(post)}
+                        disabled={postActionId === post.id}
+                      >
+                        通報する
+                      </button>
+                    </div>
+                  ) : null}
                 </article>
               ))}
             </div>
