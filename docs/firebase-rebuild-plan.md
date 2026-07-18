@@ -1243,6 +1243,96 @@ service cloud.firestore {
 9. 同じユーザーで同じ投稿を再度通報すると拒否されることを確認する。
 10. 3件目の通報で `matchPosts.status` が `"reported"` になり、`/firebase-posts` の一覧から消えることを確認する。
 
+## `/firebase-admin` 管理者モデレーション
+
+Firebase版の次段階として、管理者用の事後モデレーション画面 `/firebase-admin` を追加します。
+
+この段階の範囲:
+
+- 現行Supabase版トップページは変更しない。
+- 管理者判定はFirebase Custom Claimsではなく、まず `FIREBASE_ADMIN_EMAILS` に含まれるGoogleアカウントだけ許可する。
+- `FIREBASE_ADMIN_EMAILS` はカンマ区切りで複数指定できる。
+- 管理画面では `status` が `"reported"` または `"hidden"` の投稿だけ表示する。
+- 管理者は投稿を `"approved"` に戻せる。
+- 管理者は投稿を `"hidden"` にできる。
+- 管理者は投稿を削除できる。
+- 管理操作はクライアントからFirestoreを直接更新しない。
+- Vercel API Route + Firebase Admin SDKで管理操作を行う。
+- API Route側でFirebase ID tokenを検証し、tokenの `email` が `FIREBASE_ADMIN_EMAILS` に含まれる場合だけ許可する。
+
+管理者用API Route:
+
+- `GET /api/firebase-admin/posts`
+  - Firebase ID tokenを検証する。
+  - `FIREBASE_ADMIN_EMAILS` に含まれるemailだけ許可する。
+  - Firestore `matchPosts` から `status in ["reported", "hidden"]` の投稿だけ返す。
+- `PATCH /api/firebase-admin/posts/[id]`
+  - Firebase ID tokenを検証する。
+  - 管理者だけ許可する。
+  - `status` を `"approved"` または `"hidden"` に変更する。
+- `DELETE /api/firebase-admin/posts/[id]`
+  - Firebase ID tokenを検証する。
+  - 管理者だけ許可する。
+  - 対象投稿を削除する。
+
+必要なサーバー側環境変数:
+
+```bash
+FIREBASE_PROJECT_ID=...
+FIREBASE_CLIENT_EMAIL=...
+FIREBASE_PRIVATE_KEY=...
+REPORT_THRESHOLD=3
+FIREBASE_ADMIN_EMAILS=admin@example.invalid,moderator@example.invalid
+```
+
+注意:
+
+- `FIREBASE_ADMIN_EMAILS` はサーバー側だけで使う。
+- `FIREBASE_ADMIN_EMAILS` に `NEXT_PUBLIC_` を付けない。
+- Firebase Admin SDK秘密情報も `NEXT_PUBLIC_` を付けない。
+- `.env.local` とVercel Server Environment Variablesにだけ設定する。
+
+Firestore Rules方針:
+
+- 一般ユーザーの公開読み取りは `resource.data.status == "approved"` のみ許可する。
+- `reported` / `hidden` 投稿は一般ユーザーから読めない状態を維持する。
+- 管理画面の `reported` / `hidden` 読み取りはFirestore Rulesでは許可せず、API Route + Firebase Admin SDKだけで行う。
+- 管理者の `approved` 復帰、`hidden` 化、削除もAPI Route + Firebase Admin SDKだけで行う。
+- `postReports` は引き続きクライアントから直接読み書き禁止にする。
+
+Rulesの該当方針:
+
+```txt
+match /matchPosts/{postId} {
+  allow read: if resource.data.status == "approved";
+  allow create: if signedIn() && ...;
+  allow update: if signedIn()
+    && resource.data.ownerUid == request.auth.uid
+    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status"])
+    && request.resource.data.status == "hidden";
+  allow delete: if signedIn()
+    && resource.data.ownerUid == request.auth.uid;
+}
+
+match /postReports/{reportId} {
+  allow read, create, update, delete: if false;
+}
+```
+
+管理画面確認手順:
+
+1. `.env.local` に `FIREBASE_ADMIN_EMAILS` を追加する。
+2. 管理者として使うGoogleアカウントのemailを `FIREBASE_ADMIN_EMAILS` に含める。
+3. `pnpm run dev` を再起動する。
+4. `/firebase-admin` を開く。
+5. `FIREBASE_ADMIN_EMAILS` に含まれるGoogleアカウントでログインする。
+6. `reported` または `hidden` の投稿だけ表示されることを確認する。
+7. `FIREBASE_ADMIN_EMAILS` に含まれないGoogleアカウントでは管理対象を読み込めないことを確認する。
+8. `reported` 投稿を「公開に戻す」で `approved` に戻せることを確認する。
+9. 投稿を「非公開にする」で `hidden` にできることを確認する。
+10. 投稿を「削除する」でFirestoreから削除できることを確認する。
+11. 一般ユーザーが `/firebase-posts` で `reported` / `hidden` 投稿を読めないことを確認する。
+
 ## Vercelに登録する環境変数
 
 ### ブラウザ公開用
