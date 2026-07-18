@@ -1436,6 +1436,54 @@ Firebase AuthenticationのGoogleログインをPreview URLで使うには、Fire
 - [ ] 通報と管理操作はVercel API Route + Firebase Admin SDK経由で行う。
 - [ ] `pnpm run build` が成功している。
 
+## Firebase版トップページ切替準備
+
+`firebase-rebuild` ブランチ上で、本番トップページ `/` をFirebase版の募集一覧・検索・投稿導線へ切り替える準備を行います。`main` へのmergeはこの段階では行いません。
+
+### 切替方針
+
+- `/` はFirebase版の本番トップ候補として、Firestore `matchPosts` の `status == "approved"` 投稿一覧を表示する。
+- `/` には試合希望日、地域、中学/高校、硬式/軟式の絞り込み導線を置く。
+- `/` にはGoogleログイン導線を置き、ログイン済みユーザーだけ投稿フォームを表示する。
+- 投稿はFirestore `matchPosts` に `status: "approved"` として保存し、即時公開する。
+- 投稿本文系項目にメールアドレス、電話番号、LINE ID、SNS IDらしき文字列が含まれる場合は投稿不可にする。
+- 投稿者本人には自分の投稿だけ「非公開にする」「削除する」を表示する。
+- 他人の投稿にはログイン済みユーザーだけ「通報する」を表示する。
+- 通報処理は引き続きVercel API Route + Firebase Admin SDKで行う。
+- `/firebase-posts` は当面残し、`/` と同じFirebase版共通コンポーネントを参照する。
+- `/firebase-test` はFirebase接続確認用として残すが、本番トップページからは導線を置かない。
+- `/firebase-admin` は管理者専用ページとして残すが、一般トップページから目立つリンクは置かない。
+- 旧Supabase版のトップページ表示、Supabase版投稿詳細への導線は本番UIから外す。
+- Supabase関連の既存コード、SQL、API Routeはすぐ削除せず、切替前後の比較・rollback判断に使える状態で残す。
+
+### Rollback方針
+
+- `main` はSupabase版本番公開状態として維持し、Firebase版のPreview確認が完了するまでmergeしない。
+- Previewで問題が出た場合は、`firebase-rebuild` 上のトップページ切替commitをrevertする。
+- 本番merge後に問題が出た場合は、Vercelの直前Production Deploymentへrollbackする。
+- 本番merge後もSupabase版へ戻す必要がある場合は、`main` の直前commitへrevertするか、Supabase版トップページ実装を復元する。
+- rollback判断時に必要なため、Supabase関連コードと既存DB設定資料はFirebase切替直後には削除しない。
+
+### Preview確認手順
+
+1. `firebase-rebuild` ブランチをGitHubへpushし、Vercel Previewを更新する。
+2. Preview URLの `/` を開き、Firebase版トップページが表示されることを確認する。
+3. `/` で未ログイン状態でも `approved` 投稿一覧が表示されることを確認する。
+4. 試合希望日、地域、中学/高校、硬式/軟式で絞り込みできることを確認する。
+5. 条件に一致しない場合、「条件を変えて検索してください」の空状態が表示されることを確認する。
+6. `/` から `/firebase-test` への導線がないことを確認する。
+7. `/` から旧Supabase版の投稿詳細ページ `/posts/[id]` への導線がないことを確認する。
+8. `/` に一般利用者向けの目立つ管理リンクがないことを確認する。
+9. Googleログイン後、投稿フォームが表示されることを確認する。
+10. 投稿フォームから募集を投稿し、即時に公開一覧へ表示されることを確認する。
+11. メールアドレス、電話番号、LINE ID、SNS IDらしき文字列が本文系項目にあると投稿不可になることを確認する。
+12. 自分の投稿にだけ「非公開にする」「削除する」が表示されることを確認する。
+13. 他人の投稿にだけ「通報する」が表示されることを確認する。
+14. `/firebase-posts` でも `/` と同じFirebase版表示・操作ができることを確認する。
+15. `/firebase-admin` で管理者モデレーションが引き続き動作することを確認する。
+16. スマホ幅で横スクロールがなく、検索・投稿・通報ボタンが押しやすいことを確認する。
+17. `pnpm run build` が成功していることを確認する。
+
 ## Vercelに登録する環境変数
 
 ### ブラウザ公開用
