@@ -1505,6 +1505,16 @@ Firebase AuthenticationのGoogleログインをPreview URLで使うには、Fire
 - 2026-07-19: `.env.local`、Firebase秘密鍵、実キー、`FIREBASE_ADMIN_EMAILS` 実値がGit管理対象に含まれていないことを確認済み。
 - rollback方針は引き続きこの設計書の「Rollback方針」に維持する。
 
+### Production環境変数再設定後の確認
+
+確認結果:
+
+- 2026-07-19: Vercel Production環境変数を再設定し、本番環境の動作問題が解消したことを確認済み。
+- 2026-07-19: VercelのPreview環境変数とProduction環境変数は別管理であり、Productionにも同じFirebase設定が必要だったことを確認済み。
+- 2026-07-19: `/firebase-admin` のJSONエラーは、Production側のFirebase Admin SDK関連環境変数の不整合が原因だった可能性が高い。
+- 2026-07-19: 現在は本番URL `https://buspo-match.vercel.app/` と `https://buspo-match.vercel.app/firebase-admin` が正常に動作していることを確認済み。
+- 2026-07-19: `FIREBASE_PRIVATE_KEY` などの秘密情報はGit管理対象に含めず、Vercel Environment Variablesだけで管理する運用を維持する。
+
 ## Vercelに登録する環境変数
 
 ### ブラウザ公開用
