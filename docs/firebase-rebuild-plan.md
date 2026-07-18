@@ -1484,6 +1484,14 @@ Firebase AuthenticationのGoogleログインをPreview URLで使うには、Fire
 16. スマホ幅で横スクロールがなく、検索・投稿・通報ボタンが押しやすいことを確認する。
 17. `pnpm run build` が成功していることを確認する。
 
+確認結果:
+
+- 2026-07-19: Vercel Previewで `/` がFirebase版トップページとして表示されることを確認済み。
+- 2026-07-19: Vercel Previewの `/` でFirestore `matchPosts` の `status == "approved"` 投稿一覧が表示されることを確認済み。
+- 2026-07-19: Firebase AuthenticationのAuthorized domainsにPreviewドメインを追加後、Vercel Previewの `/` でGoogleログインできることを確認済み。
+- 2026-07-19: Vercel PreviewでFirebase Web SDK用の `NEXT_PUBLIC_FIREBASE_*` 環境変数が反映されていることを確認済み。
+- 2026-07-19: この確認時点では `firebase-rebuild` を `main` へmergeしていない。
+
 ## Vercelに登録する環境変数
 
 ### ブラウザ公開用
