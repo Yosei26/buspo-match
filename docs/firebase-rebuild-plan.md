@@ -1492,6 +1492,19 @@ Firebase AuthenticationのGoogleログインをPreview URLで使うには、Fire
 - 2026-07-19: Vercel PreviewでFirebase Web SDK用の `NEXT_PUBLIC_FIREBASE_*` 環境変数が反映されていることを確認済み。
 - 2026-07-19: この確認時点では `firebase-rebuild` を `main` へmergeしていない。
 
+### Firebase版本番切替確認
+
+確認結果:
+
+- 2026-07-19: PR #1 が `main` にmerge済みであることを確認済み。
+- 2026-07-19: merge commit は `0da543d8f3bee35ace3830b74c1499ee0d799ab2`。
+- 2026-07-19: `origin/main` にFirebase切替commit `0de3e27d2b6ddfd9fad5fcbb3e93e5a9e1399152` が含まれていることを確認済み。
+- 2026-07-19: Vercel Production Deployment が `success` であることを確認済み。
+- 2026-07-19: 本番URL `https://buspo-match.vercel.app/` がHTTP 200で応答し、Firebase版トップページとして表示されることを確認済み。
+- 2026-07-19: 本番URL `https://buspo-match.vercel.app/firebase-admin` がHTTP 200で応答し、管理者用ページとして表示されることを確認済み。
+- 2026-07-19: `.env.local`、Firebase秘密鍵、実キー、`FIREBASE_ADMIN_EMAILS` 実値がGit管理対象に含まれていないことを確認済み。
+- rollback方針は引き続きこの設計書の「Rollback方針」に維持する。
+
 ## Vercelに登録する環境変数
 
 ### ブラウザ公開用
