@@ -944,6 +944,130 @@ service cloud.firestore {
 - 2026-07-17: 投稿後、`status: "approved"` の投稿が `/firebase-posts` の一覧に即時表示されることを確認済み。
 - 同確認では `ownerUid` はFirebase Authの `uid`、`ownerEmail` はFirebase Authの `email`、`reportCount` は `0` として保存する。
 
+## `/firebase-posts` 投稿者の非公開化・削除
+
+Firebase版の次段階として、Googleログイン済みユーザーが自分の投稿だけ非公開化・削除できる機能を追加します。
+
+この段階の範囲:
+
+- 現行Supabase版トップページは変更しない。
+- `/firebase-posts` の一覧は引き続き `status == "approved"` の投稿だけ表示する。
+- ログイン済みユーザーの場合、自分の投稿にだけ「非公開にする」「削除する」ボタンを表示する。
+- 他人の投稿には操作ボタンを表示しない。
+- 非公開化は `status` を `"hidden"` に変更する。
+- 削除はFirestore documentを削除する。
+- 非公開化・削除後は一覧を再読み込みする。
+
+投稿者操作用 Firestore Security Rules案:
+
+```txt
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function validSchoolLevel(value) {
+      return value in ["middle_school", "high_school"];
+    }
+
+    function validBallType(value) {
+      return value in ["hard", "rubber"];
+    }
+
+    function hasNoContactText(text) {
+      return !(
+        text.matches(".*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}.*") ||
+        text.matches(".*0[0-9]{1,4}[- ]?[0-9]{1,4}[- ]?[0-9]{3,4}.*") ||
+        text.matches(".*line[ ]*(id)?[ ]*[:：]?[ ]*[@A-Za-z0-9._-]{3,}.*") ||
+        text.matches(".*(@[A-Za-z0-9_]{3,}|(instagram|twitter|x|tiktok|facebook|sns)[ ]*(id|アカウント)?[ ]*[:：]?[ ]*[@A-Za-z0-9._-]{3,}).*")
+      );
+    }
+
+    match /firebaseTestWrites/{writeId} {
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(["uid", "email", "message", "createdAt"])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.message is string
+        && request.resource.data.message.size() > 0
+        && request.resource.data.message.size() <= 120
+        && request.resource.data.createdAt == request.time;
+
+      allow read: if signedIn()
+        && resource.data.uid == request.auth.uid;
+
+      allow update, delete: if false;
+    }
+
+    match /matchPosts/{postId} {
+      allow read: if resource.data.status == "approved";
+
+      allow create: if signedIn()
+        && request.auth.token.email is string
+        && request.resource.data.keys().hasOnly([
+          "teamName",
+          "region",
+          "schoolLevel",
+          "ballType",
+          "matchDate",
+          "timeSlot",
+          "venue",
+          "opponentPreference",
+          "gameFormat",
+          "notes",
+          "status",
+          "ownerUid",
+          "ownerEmail",
+          "reportCount",
+          "createdAt",
+          "updatedAt"
+        ])
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerEmail == request.auth.token.email
+        && request.resource.data.status == "approved"
+        && request.resource.data.reportCount == 0
+        && validSchoolLevel(request.resource.data.schoolLevel)
+        && validBallType(request.resource.data.ballType)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && hasNoContactText(
+          request.resource.data.timeSlot + " " +
+          request.resource.data.venue + " " +
+          request.resource.data.opponentPreference + " " +
+          request.resource.data.gameFormat + " " +
+          request.resource.data.notes
+        );
+
+      allow update: if signedIn()
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status"])
+        && request.resource.data.status == "hidden";
+
+      allow delete: if signedIn()
+        && resource.data.ownerUid == request.auth.uid;
+    }
+  }
+}
+```
+
+確認手順:
+
+1. Firebase Consoleで上記Rulesを公開する。
+2. `/firebase-posts` でGoogleログインする。
+3. 自分の投稿にだけ「非公開にする」「削除する」ボタンが表示されることを確認する。
+4. 他人の投稿には操作ボタンが表示されないことを確認する。
+5. 「非公開にする」を押すと `status` が `"hidden"` になり、一覧から消えることを確認する。
+6. 「削除する」を押すとFirestore documentが削除され、一覧から消えることを確認する。
+
+確認結果:
+
+- 2026-07-18: `/firebase-posts` でGoogleログイン済みユーザーが自分の投稿だけ非公開化できることを確認済み。
+- 2026-07-18: `/firebase-posts` でGoogleログイン済みユーザーが自分の投稿だけ削除できることを確認済み。
+- 非公開化・削除後、`status == "approved"` の一覧が再読み込みされ、対象投稿が一覧から消えることを確認済み。
+
 ## Vercelに登録する環境変数
 
 ### ブラウザ公開用

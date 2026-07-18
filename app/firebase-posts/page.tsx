@@ -4,7 +4,7 @@ import Link from "next/link";
 import { type FormEvent, useEffect, useState } from "react";
 import type { User } from "firebase/auth";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
-import { addDoc, collection, getDocs, query, serverTimestamp, where, type Timestamp } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, getDocs, query, serverTimestamp, updateDoc, where, type Timestamp } from "firebase/firestore";
 import { firebaseAuth, firebaseDb, googleAuthProvider, hasFirebaseConfig } from "@/lib/firebase";
 import { contactInfoError } from "@/lib/safety";
 
@@ -94,6 +94,7 @@ export default function FirebasePostsPage() {
   const [loading, setLoading] = useState(true);
   const [authLoading, setAuthLoading] = useState(true);
   const [posting, setPosting] = useState(false);
+  const [postActionId, setPostActionId] = useState<string | null>(null);
 
   useEffect(() => {
     loadApprovedPosts();
@@ -224,6 +225,54 @@ export default function FirebasePostsPage() {
       setFormError(`募集を投稿できませんでした: ${detail}`);
     } finally {
       setPosting(false);
+    }
+  }
+
+  async function hideOwnPost(post: FirebaseMatchPost) {
+    if (!firebaseDb || !user || post.ownerUid !== user.uid) {
+      setMessage("自分の投稿だけ非公開にできます。");
+      return;
+    }
+
+    const confirmed = window.confirm("この募集を非公開にしますか。公開一覧から表示されなくなります。");
+    if (!confirmed) return;
+
+    setPostActionId(post.id);
+    setMessage("");
+    try {
+      await updateDoc(doc(firebaseDb, "matchPosts", post.id), {
+        status: "hidden"
+      });
+      setMessage("募集を非公開にしました。");
+      await loadApprovedPosts();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "不明なエラー";
+      setMessage(`募集を非公開にできませんでした: ${detail}`);
+    } finally {
+      setPostActionId(null);
+    }
+  }
+
+  async function deleteOwnPost(post: FirebaseMatchPost) {
+    if (!firebaseDb || !user || post.ownerUid !== user.uid) {
+      setMessage("自分の投稿だけ削除できます。");
+      return;
+    }
+
+    const confirmed = window.confirm("この募集を削除しますか。Firestoreから削除されます。");
+    if (!confirmed) return;
+
+    setPostActionId(post.id);
+    setMessage("");
+    try {
+      await deleteDoc(doc(firebaseDb, "matchPosts", post.id));
+      setMessage("募集を削除しました。");
+      await loadApprovedPosts();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "不明なエラー";
+      setMessage(`募集を削除できませんでした: ${detail}`);
+    } finally {
+      setPostActionId(null);
     }
   }
 
@@ -483,6 +532,27 @@ export default function FirebasePostsPage() {
                     <div className="detail-section">
                       <h2>補足</h2>
                       <p className="body-text">{post.notes}</p>
+                    </div>
+                  )}
+
+                  {user?.uid === post.ownerUid && (
+                    <div className="actions">
+                      <button
+                        className="button secondary"
+                        type="button"
+                        onClick={() => hideOwnPost(post)}
+                        disabled={postActionId === post.id}
+                      >
+                        非公開にする
+                      </button>
+                      <button
+                        className="button danger"
+                        type="button"
+                        onClick={() => deleteOwnPost(post)}
+                        disabled={postActionId === post.id}
+                      >
+                        削除する
+                      </button>
                     </div>
                   )}
                 </article>
