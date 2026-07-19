@@ -542,6 +542,75 @@ button {
   margin: 0;
 }
 
+.site-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+  margin-top: 34px;
+  padding: 18px 0 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.site-footer strong {
+  color: var(--text);
+}
+
+.site-footer p {
+  margin: 6px 0 0;
+  line-height: 1.6;
+}
+
+.site-footer nav {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.site-footer a:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.legal-page {
+  max-width: 900px;
+}
+
+.legal-content {
+  display: grid;
+  gap: 18px;
+  margin-top: 14px;
+}
+
+.legal-content h1 {
+  margin: 0;
+  font-size: clamp(30px, 5vw, 48px);
+  line-height: 1.18;
+}
+
+.legal-content h2 {
+  margin: 8px 0 0;
+  font-size: 22px;
+}
+
+.legal-content p,
+.legal-content li {
+  line-height: 1.8;
+}
+
+.legal-content p,
+.legal-content ul {
+  margin: 0;
+}
+
+.legal-content ul {
+  padding-left: 1.3em;
+}
+
 @media (max-width: 780px) {
   .hero,
   .grid.two,
@@ -671,6 +740,14 @@ button {
 
   .detail-item {
     padding: 13px;
+  }
+
+  .site-footer {
+    flex-direction: column;
+  }
+
+  .site-footer nav {
+    justify-content: flex-start;
   }
 }
 

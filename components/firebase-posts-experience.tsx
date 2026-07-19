@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
@@ -726,6 +727,19 @@ export function FirebasePostsExperience({ variant = "home" }: { variant?: "home"
             </div>
           )}
         </section>
+
+        <footer className="site-footer">
+          <div>
+            <strong>Buspo Match</strong>
+            <p>中学・高校野球向けの練習試合募集サービスです。連絡先は一般公開しない方針で運用します。</p>
+          </div>
+          <nav aria-label="固定ページ">
+            <Link href="/terms">利用規約</Link>
+            <Link href="/privacy">プライバシーポリシー</Link>
+            <Link href="/guidelines">注意事項</Link>
+            <Link href="/guidelines#contact">お問い合わせ</Link>
+          </nav>
+        </footer>
       </div>
     </main>
   );
