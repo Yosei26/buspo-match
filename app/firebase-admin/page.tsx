@@ -61,6 +61,19 @@ const inquiryStatusLabels: Record<InquiryStatus, string> = {
   closed: "対応終了"
 };
 
+function formatDateTime(value: string | null) {
+  if (!value) return "未設定";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+}
+
 export default function FirebaseAdminPage() {
   const [user, setUser] = useState<User | null>(null);
   const [posts, setPosts] = useState<ModerationPost[]>([]);
@@ -71,6 +84,9 @@ export default function FirebaseAdminPage() {
   const [authLoading, setAuthLoading] = useState(true);
   const [actionId, setActionId] = useState<string | null>(null);
   const [inquiryActionId, setInquiryActionId] = useState<string | null>(null);
+  const newInquiryCount = inquiries.filter((inquiry) => inquiry.status === "new").length;
+  const reviewedInquiryCount = inquiries.filter((inquiry) => inquiry.status === "reviewed").length;
+  const closedInquiryCount = inquiries.filter((inquiry) => inquiry.status === "closed").length;
 
   useEffect(() => {
     if (!firebaseAuth) {
@@ -354,12 +370,13 @@ export default function FirebaseAdminPage() {
           {message && <p className="notice">{message}</p>}
         </section>
 
-        <section className="section">
+        <section className="section admin-section">
           <div className="section-head">
             <div>
               <h2>管理対象投稿</h2>
               <p>通報済みまたは非公開の投稿だけを表示します。</p>
             </div>
+            <span className="mode-pill">投稿管理 {posts.length}件</span>
           </div>
 
           {loading ? (
@@ -430,13 +447,20 @@ export default function FirebaseAdminPage() {
           )}
         </section>
 
-        <section className="section">
+        <section className="section admin-section inquiries-section">
           <div className="section-head">
             <div>
               <h2>問い合わせ一覧</h2>
-              <p>投稿者の連絡先を一般公開せず、管理者確認を経由する問い合わせです。</p>
+              <p>投稿者の連絡先を一般公開せず、管理者確認を経由する問い合わせです。未確認の問い合わせから処理してください。</p>
             </div>
-            <span className="mode-pill">{inquiries.length}件</span>
+            <span className={newInquiryCount ? "mode-pill urgent" : "mode-pill"}>未確認 {newInquiryCount}件</span>
+          </div>
+
+          <div className="status-summary admin-summary">
+            <span className="badge new">未確認 {newInquiryCount}件</span>
+            <span className="badge reviewed">確認済み {reviewedInquiryCount}件</span>
+            <span className="badge closed">対応終了 {closedInquiryCount}件</span>
+            <span className="badge">合計 {inquiries.length}件</span>
           </div>
 
           {inquiryLoading ? (
@@ -444,27 +468,48 @@ export default function FirebaseAdminPage() {
           ) : !user ? (
             <p className="empty">問い合わせを見るにはGoogleログインが必要です。</p>
           ) : !inquiries.length ? (
-            <p className="empty">問い合わせはありません。</p>
+            <div className="empty">
+              <strong>未処理の問い合わせはありません。</strong>
+              <p>新しい問い合わせが届くと、この欄に対象募集、本文、送信者、投稿者、作成日時が表示されます。</p>
+            </div>
           ) : (
             <div className="post-list">
               {inquiries.map((inquiry) => (
-                <article className="post-card" key={inquiry.id}>
+                <article className={`post-card inquiry-card ${inquiry.status === "new" ? "is-new" : ""}`} key={inquiry.id}>
                   <header>
                     <div>
+                      <p className="card-kicker">問い合わせ対象の募集</p>
                       <h3>{inquiry.postTitle}</h3>
                       <div className="meta">
                         <span className={`badge ${inquiry.status}`}>{inquiryStatusLabels[inquiry.status]}</span>
-                        <span className="meta-item">送信者 {inquiry.senderEmail || "未設定"}</span>
-                        <span className="meta-item">投稿者 {inquiry.postOwnerEmail || "未設定"}</span>
-                        <span className="meta-item">作成 {inquiry.createdAt ?? "未設定"}</span>
+                        <span className="meta-item">作成 {formatDateTime(inquiry.createdAt)}</span>
                       </div>
                     </div>
                     <span className={`badge ${inquiry.status}`}>{inquiryStatusLabels[inquiry.status]}</span>
                   </header>
 
-                  <div className="detail-section">
+                  <div className="inquiry-message-block">
                     <h2>問い合わせ本文</h2>
                     <p className="body-text">{inquiry.message || "本文なし"}</p>
+                  </div>
+
+                  <div className="detail-grid inquiry-meta-grid">
+                    <div className="detail-item">
+                      <span>送信者メール</span>
+                      <strong>{inquiry.senderEmail || "未設定"}</strong>
+                    </div>
+                    <div className="detail-item">
+                      <span>投稿者メール</span>
+                      <strong>{inquiry.postOwnerEmail || "未設定"}</strong>
+                    </div>
+                    <div className="detail-item">
+                      <span>ステータス</span>
+                      <strong>{inquiryStatusLabels[inquiry.status]} ({inquiry.status})</strong>
+                    </div>
+                    <div className="detail-item">
+                      <span>作成日時</span>
+                      <strong>{formatDateTime(inquiry.createdAt)}</strong>
+                    </div>
                   </div>
 
                   <div className="actions">
