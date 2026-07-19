@@ -87,6 +87,12 @@ export default function FirebaseAdminPage() {
   const newInquiryCount = inquiries.filter((inquiry) => inquiry.status === "new").length;
   const reviewedInquiryCount = inquiries.filter((inquiry) => inquiry.status === "reviewed").length;
   const closedInquiryCount = inquiries.filter((inquiry) => inquiry.status === "closed").length;
+  const sortedInquiries = [...inquiries].sort((a, b) => {
+    const statusOrder: Record<InquiryStatus, number> = { new: 0, reviewed: 1, closed: 2 };
+    const statusDiff = statusOrder[a.status] - statusOrder[b.status];
+    if (statusDiff !== 0) return statusDiff;
+    return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
+  });
 
   useEffect(() => {
     if (!firebaseAuth) {
@@ -350,6 +356,26 @@ export default function FirebaseAdminPage() {
             </dl>
           </div>
 
+          {user ? (
+            <div className={newInquiryCount ? "admin-alert has-new" : "admin-alert"}>
+              <div>
+                <span className="card-kicker">問い合わせ確認状況</span>
+                <strong>未確認問い合わせ {newInquiryCount}件</strong>
+                <p>
+                  {newInquiryCount
+                    ? "新しい問い合わせがあります。問い合わせ管理セクションで内容を確認してください。"
+                    : "未確認の問い合わせはありません。"}
+                </p>
+              </div>
+              <div className="status-summary admin-alert-counts">
+                <span className="badge new">未確認 {newInquiryCount}件</span>
+                <span className="badge reviewed">確認済み {reviewedInquiryCount}件</span>
+                <span className="badge closed">対応終了 {closedInquiryCount}件</span>
+                <span className="badge">合計 {inquiries.length}件</span>
+              </div>
+            </div>
+          ) : null}
+
           {!user ? (
             <div className="actions">
               <button className="button" type="button" onClick={handleGoogleSignIn} disabled={!firebaseAuth || authLoading}>
@@ -474,7 +500,7 @@ export default function FirebaseAdminPage() {
             </div>
           ) : (
             <div className="post-list">
-              {inquiries.map((inquiry) => (
+              {sortedInquiries.map((inquiry) => (
                 <article className={`post-card inquiry-card ${inquiry.status === "new" ? "is-new" : ""}`} key={inquiry.id}>
                   <header>
                     <div>
