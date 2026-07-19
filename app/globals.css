@@ -620,6 +620,34 @@ button {
   font-size: 18px;
 }
 
+.admin-note-block {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  background: #f7f8f5;
+  border: 1px solid var(--line);
+  min-width: 0;
+}
+
+.admin-note-block h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.admin-note-block textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 120px;
+  resize: vertical;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
 .inquiry-meta-grid .detail-item strong {
   font-size: 15px;
   overflow-wrap: anywhere;

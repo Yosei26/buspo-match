@@ -1360,6 +1360,7 @@ match /postReports/{reportId} {
 | `senderUid` | 問い合わせ送信者のFirebase UID |
 | `senderEmail` | 問い合わせ送信者のGoogleメールアドレス |
 | `message` | 問い合わせ本文 |
+| `adminNote` | 管理者だけが閲覧・更新する内部メモ。公開画面と問い合わせ送信者には表示しない |
 | `status` | `"new"` / `"reviewed"` / `"closed"` |
 | `createdAt` | 作成日時 |
 | `updatedAt` | 更新日時 |
@@ -1380,6 +1381,8 @@ match /postReports/{reportId} {
 - `PATCH /api/firebase-admin/inquiries/[id]`
   - 管理者だけ許可する。
   - `status` を `"new"` / `"reviewed"` / `"closed"` に変更する。
+  - `adminNote` を保存する。
+  - `status` 変更と `adminNote` 更新は同じ管理APIで扱い、公開画面からは呼び出さない。
 - `DELETE /api/firebase-admin/inquiries/[id]`
   - 管理者だけ許可する。
   - 対象問い合わせを削除する。
@@ -1390,6 +1393,8 @@ Firestore Rules方針:
 - クライアントから `postInquiries` を直接読み書きしない。
 - 一般ユーザーが自分の問い合わせを読む機能は、この段階では未実装にする。
 - `postOwnerEmail` は管理者画面では確認できるが、公開詳細ページには表示しない。
+- `adminNote` は問い合わせ対応履歴や注意点を残すための管理者専用メモとし、公開ページ、投稿詳細ページ、問い合わせ送信者側には表示しない。
+- `adminNote` の閲覧・更新は `/firebase-admin` と管理APIだけで行い、Firestore Rulesでは引き続きクライアントから `postInquiries` を直接読み書き不可にする。
 
 Rulesの該当方針:
 
@@ -1410,8 +1415,10 @@ match /postInquiries/{inquiryId} {
 7. 正常な本文を送信し、Firestore `postInquiries` に `status: "new"` で保存されることを確認する。
 8. `/firebase-admin` で問い合わせ一覧が表示されることを確認する。
 9. 管理者が問い合わせを `new` / `reviewed` / `closed` に変更できることを確認する。
-10. 管理者が問い合わせを削除できることを確認する。
-11. `FIREBASE_ADMIN_EMAILS` に含まれないGoogleアカウントでは問い合わせ管理APIを使えないことを確認する。
+10. 管理者が問い合わせごとに `adminNote` を保存でき、再読み込み後も表示されることを確認する。
+11. 公開詳細ページや問い合わせ送信者側に `adminNote` が表示されないことを確認する。
+12. 管理者が問い合わせを削除できることを確認する。
+13. `FIREBASE_ADMIN_EMAILS` に含まれないGoogleアカウントでは問い合わせ管理APIを使えないことを確認する。
 
 ## 問い合わせ発生時の管理者通知設計
 

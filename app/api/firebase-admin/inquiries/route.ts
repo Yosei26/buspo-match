@@ -33,6 +33,7 @@ export async function GET(request: Request) {
         senderUid: typeof data.senderUid === "string" ? data.senderUid : "",
         senderEmail: typeof data.senderEmail === "string" ? data.senderEmail : "",
         message: typeof data.message === "string" ? data.message : "",
+        adminNote: typeof data.adminNote === "string" ? data.adminNote : "",
         status,
         createdAt: timestampToIso(data.createdAt),
         updatedAt: timestampToIso(data.updatedAt)

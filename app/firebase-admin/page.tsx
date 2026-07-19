@@ -35,6 +35,7 @@ type PostInquiry = {
   senderUid: string;
   senderEmail: string;
   message: string;
+  adminNote: string;
   status: InquiryStatus;
   createdAt: string | null;
   updatedAt: string | null;
@@ -84,6 +85,8 @@ export default function FirebaseAdminPage() {
   const [authLoading, setAuthLoading] = useState(true);
   const [actionId, setActionId] = useState<string | null>(null);
   const [inquiryActionId, setInquiryActionId] = useState<string | null>(null);
+  const [noteActionId, setNoteActionId] = useState<string | null>(null);
+  const [adminNoteDrafts, setAdminNoteDrafts] = useState<Record<string, string>>({});
   const newInquiryCount = inquiries.filter((inquiry) => inquiry.status === "new").length;
   const reviewedInquiryCount = inquiries.filter((inquiry) => inquiry.status === "reviewed").length;
   const closedInquiryCount = inquiries.filter((inquiry) => inquiry.status === "closed").length;
@@ -109,6 +112,7 @@ export default function FirebaseAdminPage() {
       } else {
         setPosts([]);
         setInquiries([]);
+        setAdminNoteDrafts({});
       }
     });
   }, []);
@@ -162,7 +166,11 @@ export default function FirebaseAdminPage() {
         setInquiries([]);
         return;
       }
-      setInquiries((result.inquiries ?? []) as PostInquiry[]);
+      const nextInquiries = (result.inquiries ?? []) as PostInquiry[];
+      setInquiries(nextInquiries);
+      setAdminNoteDrafts(
+        Object.fromEntries(nextInquiries.map((inquiry) => [inquiry.id, inquiry.adminNote ?? ""]))
+      );
     } catch (error) {
       const detail = error instanceof Error ? error.message : "不明なエラー";
       setMessage(`問い合わせを読み込めませんでした: ${detail}`);
@@ -278,6 +286,37 @@ export default function FirebaseAdminPage() {
       setMessage(`問い合わせの管理操作に失敗しました: ${detail}`);
     } finally {
       setInquiryActionId(null);
+    }
+  }
+
+  async function updateInquiryAdminNote(inquiryId: string) {
+    const headers = await authHeaders();
+    if (!headers) return;
+
+    const adminNote = (adminNoteDrafts[inquiryId] ?? "").trim();
+    setNoteActionId(inquiryId);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/firebase-admin/inquiries/${inquiryId}`, {
+        method: "PATCH",
+        headers: {
+          ...headers,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ adminNote })
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setMessage(result.error ?? "管理者メモを保存できませんでした。");
+        return;
+      }
+      setMessage("管理者メモを保存しました。");
+      await loadInquiries();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "不明なエラー";
+      setMessage(`管理者メモを保存できませんでした: ${detail}`);
+    } finally {
+      setNoteActionId(null);
     }
   }
 
@@ -535,6 +574,29 @@ export default function FirebaseAdminPage() {
                     <div className="detail-item">
                       <span>作成日時</span>
                       <strong>{formatDateTime(inquiry.createdAt)}</strong>
+                    </div>
+                  </div>
+
+                  <div className="admin-note-block">
+                    <div>
+                      <h2>管理者メモ</h2>
+                      <p className="body-text">対応履歴や注意点を残す内部メモです。公開ページや問い合わせ送信者には表示されません。</p>
+                    </div>
+                    <textarea
+                      value={adminNoteDrafts[inquiry.id] ?? inquiry.adminNote ?? ""}
+                      onChange={(event) =>
+                        setAdminNoteDrafts((current) => ({
+                          ...current,
+                          [inquiry.id]: event.target.value
+                        }))
+                      }
+                      placeholder="例: 2026/7/20 投稿者へ内容確認済み。返信前に会場条件を再確認する。"
+                      maxLength={4000}
+                    />
+                    <div className="actions">
+                      <button className="button secondary" type="button" onClick={() => updateInquiryAdminNote(inquiry.id)} disabled={noteActionId === inquiry.id}>
+                        {noteActionId === inquiry.id ? "保存中..." : "メモを保存"}
+                      </button>
                     </div>
                   </div>
 
