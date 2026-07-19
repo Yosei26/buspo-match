@@ -1,118 +1,228 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import type { Session } from "@supabase/supabase-js";
-import { demoPosts } from "@/lib/demo-data";
-import { isDevAuthBypassEnabled } from "@/lib/dev-auth";
-import { friendlyError } from "@/lib/messages";
-import { hasSupabaseConfig, supabase } from "@/lib/supabase";
-import {
-  ballTypeLabels,
-  MatchPost,
-  schoolLevelLabels,
-  statusLabels
-} from "@/lib/types";
+import type { User } from "firebase/auth";
+import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import { deleteDoc, doc, getDoc, updateDoc, type Timestamp } from "firebase/firestore";
+import { firebaseAuth, firebaseDb, googleAuthProvider, hasFirebaseConfig } from "@/lib/firebase";
 
-function extractField(text: string, labels: string[]) {
-  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
-  for (const label of labels) {
-    const found = lines.find((line) => line.startsWith(`${label}:`) || line.startsWith(`${label}：`));
-    if (found) return found.replace(new RegExp(`^${label}[:：]\\s*`), "").trim();
-  }
-  return "";
+type FirebaseMatchPost = {
+  id: string;
+  teamName: string;
+  region: string;
+  schoolLevel: "middle_school" | "high_school";
+  ballType: "hard" | "rubber";
+  matchDate: string;
+  timeSlot: string;
+  venue: string;
+  opponentPreference: string;
+  gameFormat: string;
+  notes: string;
+  status: "approved" | "reported" | "hidden";
+  ownerUid: string;
+  reportCount: number;
+  createdAt: Timestamp | null;
+  updatedAt: Timestamp | null;
+};
+
+const schoolLevelLabels: Record<FirebaseMatchPost["schoolLevel"], string> = {
+  middle_school: "中学",
+  high_school: "高校"
+};
+
+const ballTypeLabels: Record<FirebaseMatchPost["ballType"], string> = {
+  hard: "硬式",
+  rubber: "軟式"
+};
+
+function asString(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
 }
 
-function valueOrUnset(value: string | null | undefined) {
-  return value?.trim() ? value : "未設定";
+function asTimestamp(value: unknown) {
+  return value && typeof value === "object" && "toDate" in value ? (value as Timestamp) : null;
 }
 
-export default function PostDetailPage() {
+function normalizePost(id: string, data: Record<string, unknown>): FirebaseMatchPost {
+  const schoolLevel = asString(data.schoolLevel) === "middle_school" ? "middle_school" : "high_school";
+  const ballType = asString(data.ballType) === "rubber" ? "rubber" : "hard";
+  const status = asString(data.status) === "approved" ? "approved" : asString(data.status) === "reported" ? "reported" : "hidden";
+
+  return {
+    id,
+    teamName: asString(data.teamName, "チーム名未設定"),
+    region: asString(data.region, "地域未設定"),
+    schoolLevel,
+    ballType,
+    matchDate: asString(data.matchDate, "日程未設定"),
+    timeSlot: asString(data.timeSlot, "時間帯未設定"),
+    venue: asString(data.venue, "会場未設定"),
+    opponentPreference: asString(data.opponentPreference, "希望条件未設定"),
+    gameFormat: asString(data.gameFormat, "試合形式未設定"),
+    notes: asString(data.notes),
+    status,
+    ownerUid: asString(data.ownerUid),
+    reportCount: typeof data.reportCount === "number" ? data.reportCount : 0,
+    createdAt: asTimestamp(data.createdAt),
+    updatedAt: asTimestamp(data.updatedAt)
+  };
+}
+
+export default function FirebasePostDetailPage() {
   const params = useParams<{ id: string }>();
-  const [post, setPost] = useState<MatchPost | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [message, setMessage] = useState("読み込み中です。");
-  const isDemo = !hasSupabaseConfig;
-  const isDevAuth = isDevAuthBypassEnabled();
-  const isProductionReadOnly = Boolean(supabase && !isDevAuth && !isDemo);
-  const canReport = isDemo || isDevAuth || (!isProductionReadOnly && Boolean(session?.user));
+  const router = useRouter();
+  const postId = typeof params.id === "string" ? params.id : "";
+  const [user, setUser] = useState<User | null>(null);
+  const [post, setPost] = useState<FirebaseMatchPost | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [message, setMessage] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
-    if (supabase) {
-      supabase.auth.getSession().then(({ data }) => setSession(data.session));
-      const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-        setSession(nextSession);
-      });
-      return () => data.subscription.unsubscribe();
-    }
-  }, []);
-
-  useEffect(() => {
-    async function loadPost() {
-      if (!supabase) {
-        const demoPost = demoPosts.find((item) => item.id === params.id);
-        if (!demoPost) {
-          setMessage("仮データ内に該当する投稿がありません。");
-          return;
-        }
-        setPost(demoPost);
-        setMessage("");
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("match_posts")
-        .select("*, teams(name, school_level, ball_type)")
-        .eq("id", params.id)
-        .single();
-
-      if (error) {
-        setMessage(friendlyError(error, "投稿が見つからないか、閲覧権限がありません。非公開または通報対応中の投稿は一般公開されません。"));
-        return;
-      }
-      setPost(data as MatchPost);
-      setMessage("");
-    }
     loadPost();
-  }, [params.id]);
+    if (!firebaseAuth) {
+      setAuthLoading(false);
+      return;
+    }
+    return onAuthStateChanged(firebaseAuth, (nextUser) => {
+      setUser(nextUser);
+      setAuthLoading(false);
+    });
+  }, [postId]);
+
+  async function loadPost() {
+    if (!firebaseDb || !postId) {
+      setLoading(false);
+      setMessage("Firebase Web SDK設定が不足しているため、募集を読み込めません。");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+    try {
+      const snapshot = await getDoc(doc(firebaseDb, "matchPosts", postId));
+      if (!snapshot.exists()) {
+        setPost(null);
+        return;
+      }
+      const nextPost = normalizePost(snapshot.id, snapshot.data());
+      setPost(nextPost.status === "approved" ? nextPost : null);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "不明なエラー";
+      setPost(null);
+      setMessage(`募集を読み込めませんでした: ${detail}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleGoogleSignIn() {
+    if (!firebaseAuth) {
+      setMessage("Firebase Web SDK設定が不足しているため、Googleログインを開始できません。");
+      return;
+    }
+
+    setMessage("");
+    try {
+      await signInWithPopup(firebaseAuth, googleAuthProvider);
+      setMessage("Googleログインに成功しました。");
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "不明なエラー";
+      setMessage(`Googleログインに失敗しました: ${detail}`);
+    }
+  }
+
+  async function handleSignOut() {
+    if (!firebaseAuth) return;
+    await signOut(firebaseAuth);
+    setMessage("ログアウトしました。");
+  }
 
   async function reportPost() {
-    if (!post) return;
-    if (isProductionReadOnly) {
-      setMessage("通報機能は準備中です。Auth方式と運用方針が確定するまで本番では有効化しません。");
+    if (!post || !user) {
+      setMessage("通報にはGoogleログインが必要です。");
       return;
     }
-    if (!isDemo && !isDevAuth && !session?.user) {
-      setMessage("通報するにはログインが必要です。");
+    if (post.ownerUid === user.uid) {
+      setMessage("自分の投稿は通報できません。");
       return;
     }
-    const confirmed = window.confirm("この募集を通報しますか。通報が一定数を超えると自動で非表示対象になります。");
+
+    const confirmed = window.confirm("この募集を通報しますか。通報が3件以上になると一覧から非表示になります。");
     if (!confirmed) return;
-    if (!supabase) {
-      setMessage("仮データ版のため通報は実保存されません。");
-      return;
-    }
-    if (isDevAuth) {
-      const response = await fetch(`/api/dev/match-posts/${post.id}/report`, { method: "POST" });
+
+    setActionLoading(true);
+    setMessage("");
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(`/api/firebase-posts/${post.id}/report`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
       const result = await response.json();
       if (!response.ok) {
-        setMessage(result.error ?? "開発確認モードで通報を保存できませんでした。");
+        setMessage(result.error ?? "通報を保存できませんでした。");
         return;
       }
-      setMessage(result.message ?? "開発確認モードで通報を保存しました。");
+      setMessage(result.message ?? "通報を受け付けました。");
+      await loadPost();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "不明なエラー";
+      setMessage(`通報を保存できませんでした: ${detail}`);
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function hideOwnPost() {
+    if (!firebaseDb || !post || !user || post.ownerUid !== user.uid) {
+      setMessage("自分の投稿だけ非公開にできます。");
       return;
     }
-    const { error } = await supabase.from("post_reports").insert({
-      post_id: post.id,
-      reporter_id: session!.user.id,
-      reason: "詳細画面からの通報"
-    });
-    if (error) {
-      setMessage(friendlyError(error, "通報を送信できませんでした。"));
+
+    const confirmed = window.confirm("この募集を非公開にしますか。公開一覧から表示されなくなります。");
+    if (!confirmed) return;
+
+    setActionLoading(true);
+    setMessage("");
+    try {
+      await updateDoc(doc(firebaseDb, "matchPosts", post.id), {
+        status: "hidden"
+      });
+      setMessage("募集を非公開にしました。");
+      setPost(null);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "不明なエラー";
+      setMessage(`募集を非公開にできませんでした: ${detail}`);
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function deleteOwnPost() {
+    if (!firebaseDb || !post || !user || post.ownerUid !== user.uid) {
+      setMessage("自分の投稿だけ削除できます。");
       return;
     }
-    setMessage("通報を受け付けました。一定数を超えた投稿は自動で非表示対象になります。");
+
+    const confirmed = window.confirm("この募集を削除しますか。Firestoreから削除されます。");
+    if (!confirmed) return;
+
+    setActionLoading(true);
+    setMessage("");
+    try {
+      await deleteDoc(doc(firebaseDb, "matchPosts", post.id));
+      router.push("/");
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "不明なエラー";
+      setMessage(`募集を削除できませんでした: ${detail}`);
+      setActionLoading(false);
+    }
   }
 
   return (
@@ -120,85 +230,125 @@ export default function PostDetailPage() {
       <header className="topbar">
         <div className="brand">
           <strong>Buspo Match</strong>
-          <span>{isDemo ? "仮データ版 募集詳細" : "募集詳細"}</span>
+          <span>練習試合募集 詳細</span>
         </div>
-        <Link className="button secondary" href="/">
-          一覧へ戻る
-        </Link>
+        <nav className="nav">
+          <Link className="button secondary" href="/">
+            募集一覧へ戻る
+          </Link>
+          {user ? (
+            <button className="button secondary" type="button" onClick={handleSignOut}>
+              ログアウト
+            </button>
+          ) : (
+            <button className="button secondary" type="button" onClick={handleGoogleSignIn} disabled={!firebaseAuth || authLoading}>
+              Googleでログイン
+            </button>
+          )}
+        </nav>
       </header>
 
       <div className="container">
-        {message && <p className="notice">{message}</p>}
-        {post && (
-          <article className="panel detail">
-            <div className="actions">
-              {isDemo && <span className="mode-pill">仮データ</span>}
-              <span className={`badge ${post.status}`}>{statusLabels[post.status]}</span>
-              <span className="badge approved">連絡先非公開</span>
-            </div>
-            <h1>{post.teams?.name ?? "チーム名未設定"}</h1>
+        {message && <p className={message.includes("できません") || message.includes("失敗") ? "notice error" : "notice"}>{message}</p>}
 
-            <div className="detail-grid">
-              <div className="detail-item">
-                <span>試合希望日</span>
-                <strong>{post.match_date}</strong>
-              </div>
-              <div className="detail-item">
-                <span>地域</span>
-                <strong>{valueOrUnset(post.region)}</strong>
-              </div>
-              <div className="detail-item">
-                <span>区分</span>
-                <strong>{post.teams ? schoolLevelLabels[post.teams.school_level] : "未設定"}</strong>
-              </div>
-              <div className="detail-item">
-                <span>硬式/軟式</span>
-                <strong>{post.teams ? ballTypeLabels[post.teams.ball_type] : "未設定"}</strong>
-              </div>
-              <div className="detail-item">
-                <span>時間帯</span>
-                <strong>{valueOrUnset(extractField(post.body, ["時間帯", "時間"]))}</strong>
-              </div>
-              <div className="detail-item">
-                <span>会場</span>
-                <strong>{valueOrUnset(extractField(post.body, ["会場"]))}</strong>
-              </div>
-              <div className="detail-item">
-                <span>希望する相手チーム</span>
-                <strong>{valueOrUnset(extractField(post.desired_conditions, ["希望する相手チーム"]))}</strong>
-              </div>
-              <div className="detail-item">
-                <span>試合形式</span>
-                <strong>{valueOrUnset(extractField(post.desired_conditions, ["試合形式", "形式"]))}</strong>
-              </div>
-            </div>
-
-            <section className="detail-section">
-              <h2>補足</h2>
-              <p className="body-text">{valueOrUnset(extractField(post.body, ["補足"]) || post.body)}</p>
-            </section>
-
-            <section className="detail-section">
-              <h2>募集内容の原文</h2>
-              <p className="body-text">{valueOrUnset(`${post.desired_conditions}\n${post.body}`)}</p>
-            </section>
-
-            <p className="notice warn">
-              {isProductionReadOnly
-                ? "連絡先は一般公開していません。通報機能はAuth方式が確定するまで準備中です。"
-                : "連絡先は一般公開していません。投稿本文に連絡先らしき情報がある場合は通報してください。"}
+        {loading ? (
+          <p className="notice">募集を読み込んでいます。</p>
+        ) : !post ? (
+          <section className="panel detail">
+            <h1>募集が見つかりません</h1>
+            <p className="body-text">
+              この募集は存在しないか、非公開になっています。公開中の募集だけを詳細ページで表示します。
             </p>
             <div className="actions">
               <Link className="button" href="/">
-                トップページへ戻る
+                募集一覧へ戻る
               </Link>
-              {canReport ? (
-                <button className="button secondary" type="button" onClick={reportPost}>
+            </div>
+          </section>
+        ) : (
+          <section className="panel detail">
+            <div className="section-head">
+              <div>
+                <h1>{post.teamName}</h1>
+                <div className="meta">
+                  <span className="meta-item">希望日 {post.matchDate}</span>
+                  <span className="meta-item">地域 {post.region}</span>
+                  <span className="meta-item">区分 {schoolLevelLabels[post.schoolLevel]}</span>
+                  <span className="meta-item">種別 {ballTypeLabels[post.ballType]}</span>
+                  <span className="meta-item contact-private">連絡先非公開</span>
+                </div>
+              </div>
+              <span className="badge approved">公開中</span>
+            </div>
+
+            <div className="detail-grid">
+              <div className="detail-item">
+                <span>地域</span>
+                <strong>{post.region}</strong>
+              </div>
+              <div className="detail-item">
+                <span>中学/高校</span>
+                <strong>{schoolLevelLabels[post.schoolLevel]}</strong>
+              </div>
+              <div className="detail-item">
+                <span>硬式/軟式</span>
+                <strong>{ballTypeLabels[post.ballType]}</strong>
+              </div>
+              <div className="detail-item">
+                <span>希望日</span>
+                <strong>{post.matchDate}</strong>
+              </div>
+              <div className="detail-item">
+                <span>時間帯</span>
+                <strong>{post.timeSlot}</strong>
+              </div>
+              <div className="detail-item">
+                <span>会場</span>
+                <strong>{post.venue}</strong>
+              </div>
+              <div className="detail-item">
+                <span>相手希望</span>
+                <strong>{post.opponentPreference}</strong>
+              </div>
+              <div className="detail-item">
+                <span>形式</span>
+                <strong>{post.gameFormat}</strong>
+              </div>
+            </div>
+
+            <div className="detail-section">
+              <h2>補足</h2>
+              <p className="body-text">{post.notes || "補足はありません。"}</p>
+            </div>
+
+            <p className="notice warn">
+              連絡先は一般公開していません。メールアドレス、電話番号、LINE ID、SNS IDなどが投稿本文に含まれている場合は通報してください。
+            </p>
+
+            <div className="actions">
+              <Link className="button secondary" href="/">
+                募集一覧へ戻る
+              </Link>
+              {!hasFirebaseConfig ? null : !user ? (
+                <button className="button secondary" type="button" onClick={handleGoogleSignIn} disabled={!firebaseAuth || authLoading}>
+                  ログインして通報する
+                </button>
+              ) : user.uid === post.ownerUid ? (
+                <>
+                  <button className="button secondary" type="button" onClick={hideOwnPost} disabled={actionLoading}>
+                    非公開にする
+                  </button>
+                  <button className="button danger" type="button" onClick={deleteOwnPost} disabled={actionLoading}>
+                    削除する
+                  </button>
+                </>
+              ) : (
+                <button className="button secondary" type="button" onClick={reportPost} disabled={actionLoading}>
                   通報する
                 </button>
-              ) : null}
+              )}
             </div>
-          </article>
+          </section>
         )}
       </div>
     </main>

@@ -702,6 +702,12 @@ export function FirebasePostsExperience({ variant = "home" }: { variant?: "home"
                     </div>
                   ) : null}
 
+                  <div className="actions">
+                    <Link className="button secondary" href={`/posts/${post.id}`}>
+                      詳細を見る
+                    </Link>
+                  </div>
+
                   {user?.uid === post.ownerUid ? (
                     <div className="actions">
                       <button className="button secondary" type="button" onClick={() => hideOwnPost(post)} disabled={postActionId === post.id}>
