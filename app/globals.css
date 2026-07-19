@@ -62,6 +62,7 @@ button {
 .brand {
   display: grid;
   gap: 2px;
+  min-width: 0;
 }
 
 .brand strong {
@@ -78,6 +79,7 @@ button {
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .mode-pill {
@@ -142,6 +144,7 @@ button {
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
   padding: 20px;
+  min-width: 0;
 }
 
 .panel h2,
@@ -155,6 +158,7 @@ button {
   gap: 16px;
   align-items: flex-start;
   margin-bottom: 16px;
+  min-width: 0;
 }
 
 .section-head h1,
@@ -225,6 +229,7 @@ button {
 .field select,
 .field textarea {
   width: 100%;
+  min-width: 0;
   border: 1px solid var(--line);
   background: #fff;
   color: var(--text);
@@ -392,6 +397,7 @@ button {
   padding: 18px;
   background: var(--panel);
   border: 1px solid var(--line);
+  min-width: 0;
 }
 
 .post-card header {
@@ -399,6 +405,11 @@ button {
   justify-content: space-between;
   gap: 12px;
   align-items: flex-start;
+  min-width: 0;
+}
+
+.post-card header > div {
+  min-width: 0;
 }
 
 .post-card h3 {
@@ -424,6 +435,8 @@ button {
   border: 1px solid var(--line);
   color: var(--muted);
   font-weight: 700;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .contact-private {
@@ -513,6 +526,7 @@ button {
   padding: 14px;
   background: #f7f8f5;
   border: 1px solid var(--line);
+  min-width: 0;
 }
 
 .detail-item span {
@@ -524,6 +538,7 @@ button {
 .detail-item strong {
   font-size: 16px;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .detail-section {
@@ -540,6 +555,7 @@ button {
   white-space: pre-wrap;
   line-height: 1.8;
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .site-footer {
@@ -574,6 +590,12 @@ button {
 .site-footer a:hover {
   color: var(--text);
   text-decoration: underline;
+}
+
+.site-footer a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
 }
 
 .legal-page {
@@ -664,6 +686,12 @@ button {
     padding: 16px;
   }
 
+  .section-head {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
   .search-actions {
     justify-content: stretch;
   }
@@ -713,6 +741,8 @@ button {
   .mode-pill {
     width: fit-content;
     max-width: 100%;
+    min-height: 32px;
+    padding: 5px 9px;
   }
 
   .actions {
