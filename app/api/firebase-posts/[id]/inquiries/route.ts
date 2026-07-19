@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { getFirebaseAdminAuth, getFirebaseAdminDb } from "@/lib/firebase-admin";
 import { contactInfoError } from "@/lib/safety";
+import { notifyAdminsOfNewInquiry } from "@/lib/admin-notification";
 
 function getBearerToken(request: Request) {
   const authorization = request.headers.get("authorization") ?? "";
@@ -59,17 +60,29 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "自分の募集には問い合わせできません。" }, { status: 400 });
   }
 
-  await db.collection("postInquiries").add({
+  const postTitle = typeof post.teamName === "string" ? post.teamName : "チーム名未設定";
+  const postOwnerUid = typeof post.ownerUid === "string" ? post.ownerUid : "";
+  const postOwnerEmail = typeof post.ownerEmail === "string" ? post.ownerEmail : "";
+  const inquiryRef = await db.collection("postInquiries").add({
     postId: id,
-    postTitle: typeof post.teamName === "string" ? post.teamName : "チーム名未設定",
-    postOwnerUid: typeof post.ownerUid === "string" ? post.ownerUid : "",
-    postOwnerEmail: typeof post.ownerEmail === "string" ? post.ownerEmail : "",
+    postTitle,
+    postOwnerUid,
+    postOwnerEmail,
     senderUid,
     senderEmail,
     message,
     status: "new",
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp()
+  });
+
+  await notifyAdminsOfNewInquiry({
+    inquiryId: inquiryRef.id,
+    postId: id,
+    postTitle,
+    postOwnerEmail,
+    senderEmail,
+    message
   });
 
   return NextResponse.json({

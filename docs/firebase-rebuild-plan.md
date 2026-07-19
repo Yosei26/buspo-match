@@ -1413,6 +1413,47 @@ match /postInquiries/{inquiryId} {
 10. 管理者が問い合わせを削除できることを確認する。
 11. `FIREBASE_ADMIN_EMAILS` に含まれないGoogleアカウントでは問い合わせ管理APIを使えないことを確認する。
 
+## 問い合わせ発生時の管理者通知設計
+
+`postInquiries` に新しい問い合わせが作成されたとき、将来的に管理者へメール通知できるようにします。ただし、この段階では外部メール送信サービスの本番接続は行わず、安全な下準備に留めます。
+
+この段階の範囲:
+
+- `POST /api/firebase-posts/[id]/inquiries` で問い合わせ保存後に、サーバー専用helper `notifyAdminsOfNewInquiry` を呼び出す。
+- helperは `lib/admin-notification.ts` に置き、`server-only` とする。
+- 将来的にResend、SendGrid、Amazon SESなどのメール送信サービスへ差し替えられる形にする。
+- 現時点では実メール送信は行わない。
+- 現時点では `console.info` による安全なログ出力に留める。
+- ログには本文そのものを出さず、`messageLength` など最小限の確認情報だけを出す。
+- 通知payloadとして、問い合わせID、投稿ID、投稿タイトル、送信者メール、投稿者メール、問い合わせ本文を扱える構造にする。
+- 秘密情報や実メールアドレスはコードに直書きしない。
+
+将来の通知payload:
+
+| 項目 | 内容 |
+| --- | --- |
+| `inquiryId` | 作成された `postInquiries` document ID |
+| `postId` | 問い合わせ対象の `matchPosts` document ID |
+| `postTitle` | 問い合わせ対象の募集タイトル |
+| `postOwnerEmail` | 投稿者メール。管理者通知用途に限定 |
+| `senderEmail` | 問い合わせ送信者メール |
+| `message` | 問い合わせ本文。現時点ではメール送信しない |
+
+将来使う可能性があるサーバー専用環境変数:
+
+```bash
+ADMIN_NOTIFICATION_EMAILS=admin@example.invalid
+MAIL_PROVIDER_API_KEY=your-mail-provider-api-key
+```
+
+運用方針:
+
+- 本番ではまだメール送信しない。
+- `MAIL_PROVIDER_API_KEY` は現時点では使用しない。
+- 将来メール送信を有効化する場合は、送信先、送信内容、ログ方針、失敗時の挙動を別途確認してから実装する。
+- メール送信を有効化しても、問い合わせ本文や投稿者メールを公開画面へ表示しない方針は維持する。
+- メール送信に失敗しても、問い合わせ保存自体を壊さない設計を検討する。
+
 ## Vercel Preview確認準備
 
 Firebase版は `firebase-rebuild` ブランチのPreviewで確認し、現行Supabase版の `main` 本番公開には影響させません。VercelのEnvironment Variablesは、まずPreview環境に限定して設定します。
