@@ -488,6 +488,24 @@ button {
   color: #43505a;
 }
 
+.badge.new {
+  background: #fff8e8;
+  border-color: #ecd5a6;
+  color: var(--warn);
+}
+
+.badge.reviewed {
+  background: #eef8ee;
+  border-color: #b9daba;
+  color: var(--accent-dark);
+}
+
+.badge.closed {
+  background: #eef0f2;
+  border-color: #cbd2d8;
+  color: #43505a;
+}
+
 .empty {
   padding: 24px;
   border: 1px dashed var(--line);
@@ -544,6 +562,12 @@ button {
 .detail-section {
   display: grid;
   gap: 8px;
+}
+
+.panel-soft {
+  padding: 16px;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
 }
 
 .detail-section h2 {

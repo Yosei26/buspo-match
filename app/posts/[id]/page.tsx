@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import type { User } from "firebase/auth";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import { deleteDoc, doc, getDoc, updateDoc, type Timestamp } from "firebase/firestore";
 import { firebaseAuth, firebaseDb, googleAuthProvider, hasFirebaseConfig } from "@/lib/firebase";
+import { contactInfoError } from "@/lib/safety";
 
 type FirebaseMatchPost = {
   id: string;
@@ -80,6 +81,9 @@ export default function FirebasePostDetailPage() {
   const [authLoading, setAuthLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
+  const [inquiryMessage, setInquiryMessage] = useState("");
+  const [inquiryStatus, setInquiryStatus] = useState("");
+  const [inquiryLoading, setInquiryLoading] = useState(false);
 
   useEffect(() => {
     loadPost();
@@ -225,6 +229,56 @@ export default function FirebasePostDetailPage() {
     }
   }
 
+  async function submitInquiry(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!post || !user) {
+      setInquiryStatus("ログインすると問い合わせできます。");
+      return;
+    }
+    if (post.ownerUid === user.uid) {
+      setInquiryStatus("自分の募集には問い合わせできません。");
+      return;
+    }
+
+    const nextMessage = inquiryMessage.trim();
+    if (!nextMessage) {
+      setInquiryStatus("問い合わせ本文を入力してください。");
+      return;
+    }
+
+    const blocked = contactInfoError(nextMessage);
+    if (blocked) {
+      setInquiryStatus(blocked);
+      return;
+    }
+
+    setInquiryLoading(true);
+    setInquiryStatus("");
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(`/api/firebase-posts/${post.id}/inquiries`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ message: nextMessage })
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setInquiryStatus(result.error ?? "問い合わせを送信できませんでした。");
+        return;
+      }
+      setInquiryMessage("");
+      setInquiryStatus(result.message ?? "問い合わせを送信しました。管理者が内容を確認します。");
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "不明なエラー";
+      setInquiryStatus(`問い合わせを送信できませんでした: ${detail}`);
+    } finally {
+      setInquiryLoading(false);
+    }
+  }
+
   return (
     <main className="shell">
       <header className="topbar">
@@ -324,6 +378,48 @@ export default function FirebasePostDetailPage() {
             <p className="notice warn">
               連絡先は一般公開していません。メールアドレス、電話番号、LINE ID、SNS IDなどが投稿本文に含まれている場合は通報してください。
             </p>
+
+            <section className="detail-section panel-soft">
+              <h2>この募集について問い合わせる</h2>
+              {user?.uid === post.ownerUid ? (
+                <p className="notice warn">自分の募集には問い合わせフォームを表示しません。募集内容の修正や削除は投稿者操作を使ってください。</p>
+              ) : !user ? (
+                <div className="grid">
+                  <p className="notice warn">ログインすると問い合わせできます。問い合わせ内容は管理者が確認し、投稿者の連絡先は一般公開されません。</p>
+                  <div className="actions">
+                    <button className="button secondary" type="button" onClick={handleGoogleSignIn} disabled={!firebaseAuth || authLoading}>
+                      Googleでログイン
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <form className="match-form" onSubmit={submitInquiry}>
+                  <div className="field">
+                    <label htmlFor="inquiryMessage">問い合わせ本文</label>
+                    <textarea
+                      id="inquiryMessage"
+                      value={inquiryMessage}
+                      onChange={(event) => setInquiryMessage(event.target.value)}
+                      placeholder="例: 〇月〇日の募集について、こちらの学年構成でも参加可能か確認したいです。"
+                      required
+                    />
+                  </div>
+                  <p className="notice warn">
+                    問い合わせは管理者確認を経由します。メールアドレス、電話番号、LINE ID、SNS IDなどの連絡先は入力しないでください。
+                  </p>
+                  {inquiryStatus && (
+                    <p className={inquiryStatus.includes("できません") || inquiryStatus.includes("入力してください") || inquiryStatus.includes("含まれています") ? "notice error" : "notice"}>
+                      {inquiryStatus}
+                    </p>
+                  )}
+                  <div className="actions">
+                    <button className="button" disabled={inquiryLoading}>
+                      問い合わせを送信する
+                    </button>
+                  </div>
+                </form>
+              )}
+            </section>
 
             <div className="actions">
               <Link className="button secondary" href="/">

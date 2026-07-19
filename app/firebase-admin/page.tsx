@@ -24,6 +24,22 @@ type ModerationPost = {
   updatedAt: string | null;
 };
 
+type InquiryStatus = "new" | "reviewed" | "closed";
+
+type PostInquiry = {
+  id: string;
+  postId: string;
+  postTitle: string;
+  postOwnerUid: string;
+  postOwnerEmail: string;
+  senderUid: string;
+  senderEmail: string;
+  message: string;
+  status: InquiryStatus;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
 const schoolLevelLabels: Record<ModerationPost["schoolLevel"], string> = {
   middle_school: "中学",
   high_school: "高校"
@@ -39,13 +55,22 @@ const statusLabels: Record<ModerationPost["status"], string> = {
   hidden: "非公開"
 };
 
+const inquiryStatusLabels: Record<InquiryStatus, string> = {
+  new: "未確認",
+  reviewed: "確認済み",
+  closed: "対応終了"
+};
+
 export default function FirebaseAdminPage() {
   const [user, setUser] = useState<User | null>(null);
   const [posts, setPosts] = useState<ModerationPost[]>([]);
+  const [inquiries, setInquiries] = useState<PostInquiry[]>([]);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [inquiryLoading, setInquiryLoading] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [actionId, setActionId] = useState<string | null>(null);
+  const [inquiryActionId, setInquiryActionId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!firebaseAuth) {
@@ -58,8 +83,10 @@ export default function FirebaseAdminPage() {
       setAuthLoading(false);
       if (nextUser) {
         loadModerationPosts(nextUser);
+        loadInquiries(nextUser);
       } else {
         setPosts([]);
+        setInquiries([]);
       }
     });
   }, []);
@@ -93,6 +120,32 @@ export default function FirebaseAdminPage() {
       setMessage(`管理対象の投稿を読み込めませんでした: ${detail}`);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadInquiries(currentUser = user) {
+    const headers = await authHeaders(currentUser);
+    if (!headers) {
+      setMessage("管理画面にはGoogleログインが必要です。");
+      return;
+    }
+
+    setInquiryLoading(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/firebase-admin/inquiries", { headers });
+      const result = await response.json();
+      if (!response.ok) {
+        setMessage(result.error ?? "問い合わせを読み込めませんでした。");
+        setInquiries([]);
+        return;
+      }
+      setInquiries((result.inquiries ?? []) as PostInquiry[]);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "不明なエラー";
+      setMessage(`問い合わせを読み込めませんでした: ${detail}`);
+    } finally {
+      setInquiryLoading(false);
     }
   }
 
@@ -176,6 +229,65 @@ export default function FirebaseAdminPage() {
     }
   }
 
+  async function updateInquiryStatus(inquiryId: string, status: InquiryStatus) {
+    const headers = await authHeaders();
+    if (!headers) return;
+
+    setInquiryActionId(inquiryId);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/firebase-admin/inquiries/${inquiryId}`, {
+        method: "PATCH",
+        headers: {
+          ...headers,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ status })
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setMessage(result.error ?? "問い合わせの管理操作に失敗しました。");
+        return;
+      }
+      setMessage("問い合わせステータスを更新しました。");
+      await loadInquiries();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "不明なエラー";
+      setMessage(`問い合わせの管理操作に失敗しました: ${detail}`);
+    } finally {
+      setInquiryActionId(null);
+    }
+  }
+
+  async function deleteInquiry(inquiryId: string) {
+    const headers = await authHeaders();
+    if (!headers) return;
+
+    const confirmed = window.confirm("この問い合わせを削除しますか。");
+    if (!confirmed) return;
+
+    setInquiryActionId(inquiryId);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/firebase-admin/inquiries/${inquiryId}`, {
+        method: "DELETE",
+        headers
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setMessage(result.error ?? "問い合わせを削除できませんでした。");
+        return;
+      }
+      setMessage("問い合わせを削除しました。");
+      await loadInquiries();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "不明なエラー";
+      setMessage(`問い合わせを削除できませんでした: ${detail}`);
+    } finally {
+      setInquiryActionId(null);
+    }
+  }
+
   return (
     <main className="shell">
       <header className="topbar">
@@ -232,6 +344,9 @@ export default function FirebaseAdminPage() {
             <div className="actions">
               <button className="button secondary" type="button" onClick={() => loadModerationPosts()} disabled={loading}>
                 再読み込み
+              </button>
+              <button className="button secondary" type="button" onClick={() => loadInquiries()} disabled={inquiryLoading}>
+                問い合わせ再読み込み
               </button>
             </div>
           )}
@@ -306,6 +421,66 @@ export default function FirebaseAdminPage() {
                       非公開にする
                     </button>
                     <button className="button danger" type="button" onClick={() => deletePost(post.id)} disabled={actionId === post.id}>
+                      削除する
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="section">
+          <div className="section-head">
+            <div>
+              <h2>問い合わせ一覧</h2>
+              <p>投稿者の連絡先を一般公開せず、管理者確認を経由する問い合わせです。</p>
+            </div>
+            <span className="mode-pill">{inquiries.length}件</span>
+          </div>
+
+          {inquiryLoading ? (
+            <p className="notice">問い合わせを読み込んでいます。</p>
+          ) : !user ? (
+            <p className="empty">問い合わせを見るにはGoogleログインが必要です。</p>
+          ) : !inquiries.length ? (
+            <p className="empty">問い合わせはありません。</p>
+          ) : (
+            <div className="post-list">
+              {inquiries.map((inquiry) => (
+                <article className="post-card" key={inquiry.id}>
+                  <header>
+                    <div>
+                      <h3>{inquiry.postTitle}</h3>
+                      <div className="meta">
+                        <span className={`badge ${inquiry.status}`}>{inquiryStatusLabels[inquiry.status]}</span>
+                        <span className="meta-item">送信者 {inquiry.senderEmail || "未設定"}</span>
+                        <span className="meta-item">投稿者 {inquiry.postOwnerEmail || "未設定"}</span>
+                        <span className="meta-item">作成 {inquiry.createdAt ?? "未設定"}</span>
+                      </div>
+                    </div>
+                    <span className={`badge ${inquiry.status}`}>{inquiryStatusLabels[inquiry.status]}</span>
+                  </header>
+
+                  <div className="detail-section">
+                    <h2>問い合わせ本文</h2>
+                    <p className="body-text">{inquiry.message || "本文なし"}</p>
+                  </div>
+
+                  <div className="actions">
+                    <Link className="button secondary" href={`/posts/${inquiry.postId}`}>
+                      募集詳細を開く
+                    </Link>
+                    <button className="button secondary" type="button" onClick={() => updateInquiryStatus(inquiry.id, "new")} disabled={inquiryActionId === inquiry.id}>
+                      未確認に戻す
+                    </button>
+                    <button className="button" type="button" onClick={() => updateInquiryStatus(inquiry.id, "reviewed")} disabled={inquiryActionId === inquiry.id}>
+                      確認済みにする
+                    </button>
+                    <button className="button secondary" type="button" onClick={() => updateInquiryStatus(inquiry.id, "closed")} disabled={inquiryActionId === inquiry.id}>
+                      対応終了にする
+                    </button>
+                    <button className="button danger" type="button" onClick={() => deleteInquiry(inquiry.id)} disabled={inquiryActionId === inquiry.id}>
                       削除する
                     </button>
                   </div>

@@ -1333,6 +1333,86 @@ match /postReports/{reportId} {
 10. 投稿を「削除する」でFirestoreから削除できることを確認する。
 11. 一般ユーザーが `/firebase-posts` で `reported` / `hidden` 投稿を読めないことを確認する。
 
+## 管理者経由の問い合わせフォーム
+
+公開中の募集詳細ページ `/posts/[id]` に、投稿者の連絡先を直接表示せず管理者経由で問い合わせできる簡易フォームを追加します。
+
+この段階の範囲:
+
+- 問い合わせはGoogleログイン済みユーザーだけ送信できる。
+- 未ログイン時は「ログインすると問い合わせできます」と表示する。
+- 自分の投稿には問い合わせフォームを表示しない。
+- 問い合わせ本文 `message` は必須にする。
+- メールアドレス、電話番号、LINE ID、SNS IDらしき文字列が含まれる場合は送信不可にする。
+- 問い合わせはFirestore `postInquiries` collectionに保存する。
+- 投稿者メールアドレスは一般画面には表示しない。
+- 問い合わせ保存はVercel API Route + Firebase Admin SDKで行い、サーバー側で対象投稿の `ownerEmail` を取得する。
+- `/firebase-admin` に問い合わせ一覧を追加し、管理者だけが確認・ステータス変更・削除できる。
+
+`postInquiries` の保存項目:
+
+| 項目 | 内容 |
+| --- | --- |
+| `postId` | 問い合わせ対象の `matchPosts` document ID |
+| `postTitle` | 対象募集のチーム名 |
+| `postOwnerUid` | 投稿者のFirebase UID |
+| `postOwnerEmail` | 投稿者のGoogleメールアドレス。一般画面には表示しない |
+| `senderUid` | 問い合わせ送信者のFirebase UID |
+| `senderEmail` | 問い合わせ送信者のGoogleメールアドレス |
+| `message` | 問い合わせ本文 |
+| `status` | `"new"` / `"reviewed"` / `"closed"` |
+| `createdAt` | 作成日時 |
+| `updatedAt` | 更新日時 |
+
+問い合わせ用API Route:
+
+- `POST /api/firebase-posts/[id]/inquiries`
+  - Firebase ID tokenを検証する。
+  - ログイン済みユーザーだけ許可する。
+  - 対象投稿が `approved` の場合だけ許可する。
+  - 自分の投稿への問い合わせは拒否する。
+  - `message` が空、または連絡先らしき文字列を含む場合は拒否する。
+  - Firebase Admin SDKで `postInquiries` に保存する。
+- `GET /api/firebase-admin/inquiries`
+  - Firebase ID tokenを検証する。
+  - `FIREBASE_ADMIN_EMAILS` に含まれるemailだけ許可する。
+  - `postInquiries` の一覧を返す。
+- `PATCH /api/firebase-admin/inquiries/[id]`
+  - 管理者だけ許可する。
+  - `status` を `"new"` / `"reviewed"` / `"closed"` に変更する。
+- `DELETE /api/firebase-admin/inquiries/[id]`
+  - 管理者だけ許可する。
+  - 対象問い合わせを削除する。
+
+Firestore Rules方針:
+
+- 問い合わせ作成、一覧取得、ステータス変更、削除はAPI Route + Firebase Admin SDKだけで行う。
+- クライアントから `postInquiries` を直接読み書きしない。
+- 一般ユーザーが自分の問い合わせを読む機能は、この段階では未実装にする。
+- `postOwnerEmail` は管理者画面では確認できるが、公開詳細ページには表示しない。
+
+Rulesの該当方針:
+
+```txt
+match /postInquiries/{inquiryId} {
+  allow read, create, update, delete: if false;
+}
+```
+
+確認手順:
+
+1. `/posts/[id]` で公開中の他人の募集を開く。
+2. 未ログイン時は問い合わせフォームではなく「ログインすると問い合わせできます」と表示されることを確認する。
+3. Googleログイン後、他人の募集に問い合わせフォームが表示されることを確認する。
+4. 自分の募集では問い合わせフォームが表示されないことを確認する。
+5. 空の問い合わせ本文は送信できないことを確認する。
+6. メールアドレス、電話番号、LINE ID、SNS IDらしき文字列を含む本文が拒否されることを確認する。
+7. 正常な本文を送信し、Firestore `postInquiries` に `status: "new"` で保存されることを確認する。
+8. `/firebase-admin` で問い合わせ一覧が表示されることを確認する。
+9. 管理者が問い合わせを `new` / `reviewed` / `closed` に変更できることを確認する。
+10. 管理者が問い合わせを削除できることを確認する。
+11. `FIREBASE_ADMIN_EMAILS` に含まれないGoogleアカウントでは問い合わせ管理APIを使えないことを確認する。
+
 ## Vercel Preview確認準備
 
 Firebase版は `firebase-rebuild` ブランチのPreviewで確認し、現行Supabase版の `main` 本番公開には影響させません。VercelのEnvironment Variablesは、まずPreview環境に限定して設定します。
