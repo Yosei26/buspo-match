@@ -361,7 +361,7 @@ export default function FirebaseAdminPage() {
             Firebase募集一覧
           </Link>
           <Link className="admin-link" href="/">
-            Supabase版トップ
+            公開トップ
           </Link>
           {user ? (
             <button className="button secondary" type="button" onClick={handleSignOut}>
