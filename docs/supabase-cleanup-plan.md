@@ -171,3 +171,33 @@ Firebase版本番運用に不要となり、本番導線から完全に外れて
 - 削除対象外のSupabase clientとSQLは、次段階の依存整理またはdocs整理まで残す。
 - 削除後に `rg` で `@/lib/dev-auth`、`isDevAuthBypassEnabled`、`/api/dev/match-posts` の残存参照を確認する。
 - `pnpm run build` を実行し、importエラーやroute生成エラーがないことを確認する。
+
+## 第2段階削除の実施記録
+
+実施日: 2026-07-21
+
+第1段階で旧Supabase管理画面と旧開発確認APIを削除したため、そこから参照されていたSupabase helperを削除対象にしました。
+
+削除したファイル:
+
+- `lib/supabase.ts`
+- `lib/supabase-admin.ts`
+
+この段階で削除しなかったもの:
+
+- `package.json` と `pnpm-lock.yaml` の `@supabase/supabase-js`
+- `supabase/*.sql`
+- `.env.example` のSupabase関連変数
+- README内の旧Supabase手順
+- `lib/types.ts`
+- `lib/messages.ts`
+
+残参照の扱い:
+
+- `supabase`、`createClient`、`SUPABASE`、`NEXT_PUBLIC_SUPABASE` の検索結果は、今回残す方針の `README.md`、`.env.example`、`package.json`、`pnpm-lock.yaml`、`supabase/*.sql`、移行docs内の記述に限定する。
+- `app`、`components`、Firebase管理API、Firebase投稿APIから旧Supabase helperへのimportがないことを確認する。
+
+確認方針:
+
+- Firebase版の `/`、`/posts/[id]`、`/firebase-admin`、投稿、通報、問い合わせ、管理者メモは維持する。
+- `pnpm run build` を実行し、importエラーや型エラーがないことを確認する。
