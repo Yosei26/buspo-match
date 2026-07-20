@@ -2,8 +2,8 @@ import Link from "next/link";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "注意事項 | Buspo Match",
-  description: "Buspo Matchを安全に使うための注意事項"
+  title: "利用方法・注意事項 | Buspo Match",
+  description: "Buspo Matchを安全に使うための利用方法と注意事項"
 };
 
 export default function GuidelinesPage() {
@@ -16,7 +16,7 @@ export default function GuidelinesPage() {
 
         <section className="panel legal-content">
           <p className="mode-pill">暫定版</p>
-          <h1>注意事項</h1>
+          <h1>利用方法・注意事項</h1>
           <p>
             Buspo Matchは、中学・高校野球の練習試合募集を安全に共有するためのサービスです。
             学校関係者、顧問、保護者、チーム代表者が利用する前提で、以下を守ってください。
@@ -49,9 +49,10 @@ export default function GuidelinesPage() {
             未ログインでも、公開中の募集一覧は閲覧できます。
           </p>
 
-          <h2 id="contact">問い合わせ導線</h2>
+          <h2 id="contact">募集への問い合わせ手順</h2>
+          <p className="notice warn">このページは一般問い合わせフォームではありません。</p>
           <p>
-            募集への問い合わせは、各募集の詳細ページから行います。Googleログイン済みユーザーは、詳細ページ内の管理者経由問い合わせフォームを利用できます。
+            募集への問い合わせは、各募集の詳細ページからGoogleログイン後に行えます。Googleログイン済みユーザーは、詳細ページ内の管理者経由問い合わせフォームを利用できます。
             問い合わせ内容は管理者が確認し、必要に応じて対応します。投稿者の連絡先は一般公開されません。
             問い合わせ本文にも、メールアドレス、電話番号、LINE ID、SNS IDなどの連絡先や個人情報を記載しないでください。
           </p>
