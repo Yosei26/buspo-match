@@ -646,6 +646,7 @@ export function FirebasePostsExperience({ variant = "home" }: { variant?: "home"
                   ? "指定した条件に一致する公開募集を表示しています。"
                   : "未ログインでも読める公開募集を日程順で表示します。"}
               </p>
+              <p>募集への問い合わせは、各募集の詳細ページからGoogleログイン後に行えます。</p>
             </div>
             <span className="mode-pill">{filteredPosts.length}件</span>
           </div>
@@ -743,7 +744,7 @@ export function FirebasePostsExperience({ variant = "home" }: { variant?: "home"
             <Link href="/terms">利用規約</Link>
             <Link href="/privacy">プライバシーポリシー</Link>
             <Link href="/guidelines">注意事項</Link>
-            <Link href="/guidelines#contact">お問い合わせ</Link>
+            <Link href="/guidelines#contact">問い合わせ方法</Link>
           </nav>
         </footer>
       </div>
