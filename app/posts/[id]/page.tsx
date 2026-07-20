@@ -381,11 +381,15 @@ export default function FirebasePostDetailPage() {
 
             <section className="detail-section panel-soft">
               <h2>この募集について問い合わせる</h2>
+              <p className="body-text">
+                問い合わせは管理者経由で送信されます。投稿者の連絡先は一般公開されません。
+                問い合わせ本文にもメールアドレス、電話番号、LINE ID、SNS IDなどの連絡先を書かないでください。
+              </p>
               {user?.uid === post.ownerUid ? (
                 <p className="notice warn">自分の募集には問い合わせフォームを表示しません。募集内容の修正や削除は投稿者操作を使ってください。</p>
               ) : !user ? (
                 <div className="grid">
-                  <p className="notice warn">ログインすると問い合わせできます。問い合わせ内容は管理者が確認し、投稿者の連絡先は一般公開されません。</p>
+                  <p className="notice warn">Googleログイン後に、この募集への問い合わせを送信できます。</p>
                   <div className="actions">
                     <button className="button secondary" type="button" onClick={handleGoogleSignIn} disabled={!firebaseAuth || authLoading}>
                       Googleでログイン
@@ -405,7 +409,7 @@ export default function FirebasePostDetailPage() {
                     />
                   </div>
                   <p className="notice warn">
-                    問い合わせは管理者確認を経由します。メールアドレス、電話番号、LINE ID、SNS IDなどの連絡先は入力しないでください。
+                    送信前に内容を確認してください。連絡先らしき文字列が含まれる場合は送信できません。
                   </p>
                   {inquiryStatus && (
                     <p className={inquiryStatus.includes("できません") || inquiryStatus.includes("入力してください") || inquiryStatus.includes("含まれています") ? "notice error" : "notice"}>
