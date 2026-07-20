@@ -1,10 +1,10 @@
-type SupabaseLikeError = {
+type AppLikeError = {
   message?: string;
   code?: string;
   details?: string;
 };
 
-export function friendlyError(error: SupabaseLikeError, fallback = "処理に失敗しました。時間をおいて再度お試しください。") {
+export function friendlyError(error: AppLikeError, fallback = "処理に失敗しました。時間をおいて再度お試しください。") {
   const text = `${error.message ?? ""} ${error.details ?? ""}`.toLowerCase();
 
   if (error.code === "42501" || text.includes("row-level security") || text.includes("permission denied")) {
